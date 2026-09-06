@@ -14,7 +14,9 @@ import {
   BridgeProtocol,
   BridgeStandard,
   BridgeTransaction,
-  BridgeQuote
+  BridgeQuote,
+  BatchRoyaltyUpdateItem,
+  BatchRoyaltyResult
 } from '../types';
 import { SUPPORTED_CHAINS, CHAIN_LIST } from '../data/chains';
 import { INITIAL_COLLECTIONS, INITIAL_NFTS, INITIAL_ROYALTY_LOGS, INITIAL_TRANSACTIONS } from '../data/mockData';
@@ -131,6 +133,7 @@ interface Web3ContextType {
     onStepUpdate?: (step: number, message: string) => void;
   }) => Promise<{ success: boolean; bridgeTx?: BridgeTransaction; error?: string }>;
   clearBridgeHistory: () => void;
+  batchUpdateRoyalties: (updates: BatchRoyaltyUpdateItem[]) => Promise<BatchRoyaltyResult>;
   
   // Stats
   totalPortfolioValueUsd: number;
@@ -1387,6 +1390,93 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem(STORAGE_KEYS.BRIDGE_TXS);
   };
 
+  // BATCH UPDATE ROYALTIES
+  const batchUpdateRoyalties = async (
+    updates: BatchRoyaltyUpdateItem[]
+  ): Promise<BatchRoyaltyResult> => {
+    if (!updates || updates.length === 0) {
+      return { success: false, updatedCount: 0, error: 'No collection updates provided' };
+    }
+
+    const targetChain = activeChain;
+    const chainConfig = SUPPORTED_CHAINS[targetChain];
+    const baseMulticallGas = 0.0004; // Multicall batch optimization
+    const perCollectionGas = 0.00012;
+    const totalGasCrypto = +(baseMulticallGas + perCollectionGas * updates.length).toFixed(6);
+    const totalGasUsd = +(totalGasCrypto * chainConfig.usdPrice).toFixed(2);
+
+    // Deduct gas from active account balance
+    setAccounts(prev => prev.map((acc, i) => {
+      if (i === activeAccountIndex) {
+        return {
+          ...acc,
+          balances: {
+            ...acc.balances,
+            [targetChain]: +(Math.max(0, (acc.balances[targetChain] || 0) - totalGasCrypto)).toFixed(6),
+          },
+        };
+      }
+      return acc;
+    }));
+
+    const updateMap = new Map(updates.map(u => [u.collectionId, u]));
+
+    // Update collections state
+    setCollections(prev => prev.map(c => {
+      const update = updateMap.get(c.id);
+      if (update) {
+        return {
+          ...c,
+          royaltyPercentage: update.royaltyPercentage,
+          royaltyPayoutAddress: update.royaltyPayoutAddress || c.royaltyPayoutAddress || activeAccount.address,
+        };
+      }
+      return c;
+    }));
+
+    // Update all matching NFTs in state so marketplace and details stay in sync
+    setNfts(prev => prev.map(nft => {
+      if (nft.collectionId && updateMap.has(nft.collectionId)) {
+        const update = updateMap.get(nft.collectionId)!;
+        return {
+          ...nft,
+          royaltyPercentage: update.royaltyPercentage,
+          royaltyPayoutAddress: update.royaltyPayoutAddress || nft.royaltyPayoutAddress || activeAccount.address,
+        };
+      }
+      return nft;
+    }));
+
+    // Generate confirmed transaction record
+    const txHash = `0x${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
+    const royaltyTx: TransactionRecord = {
+      id: `tx-royalty-update-${Date.now()}`,
+      type: 'update_royalties',
+      txHash,
+      chainId: targetChain,
+      fromAddress: activeAccount.address,
+      toAddress: '0x0000000000000000000000000000000000000000',
+      amountCrypto: 0,
+      amountUsd: 0,
+      gasUsedCrypto: totalGasCrypto,
+      gasUsedUsd: totalGasUsd,
+      gasPriceGwei: gasData.currentGwei,
+      collectionName: `${updates.length} Collections (ERC-2981 Batch)`,
+      timestamp: Date.now(),
+      status: 'confirmed',
+      blockNumber: Math.floor(18000000 + Math.random() * 500000),
+    };
+    setTransactions(prev => [royaltyTx, ...prev]);
+
+    return {
+      success: true,
+      updatedCount: updates.length,
+      txHash,
+      totalGasUsedCrypto: totalGasCrypto,
+      totalGasUsedUsd: totalGasUsd,
+    };
+  };
+
   // Aggregated Stats
   const totalPortfolioValueUsd = nfts
     .filter(n => n.ownerAddress.toLowerCase() === activeAccount.address.toLowerCase())
@@ -1442,6 +1532,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         toggleLikeNFT,
         bridgeNFT,
         clearBridgeHistory,
+        batchUpdateRoyalties,
 
         totalPortfolioValueUsd,
         totalRoyaltyEarnedUsd,

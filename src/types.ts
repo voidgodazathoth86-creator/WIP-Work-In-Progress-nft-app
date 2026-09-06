@@ -143,7 +143,7 @@ export interface WalletAccount {
 
 export interface TransactionRecord {
   id: string;
-  type: 'mint' | 'deploy_collection' | 'list' | 'delist' | 'buy' | 'sell' | 'transfer' | 'burn' | 'royalty_received' | 'faucet' | 'bridge_out' | 'bridge_in';
+  type: 'mint' | 'deploy_collection' | 'list' | 'delist' | 'buy' | 'sell' | 'transfer' | 'burn' | 'royalty_received' | 'faucet' | 'bridge_out' | 'bridge_in' | 'update_royalties';
   txHash: string;
   chainId: BlockchainNetwork;
   fromAddress: string;
@@ -348,5 +348,20 @@ export interface BridgeQuote {
   totalCostUsd: number;
   securityScore: number; // 1-100
   securityNote: string;
+}
+
+export interface BatchRoyaltyUpdateItem {
+  collectionId: string;
+  royaltyPercentage: number;
+  royaltyPayoutAddress?: string;
+}
+
+export interface BatchRoyaltyResult {
+  success: boolean;
+  updatedCount: number;
+  txHash?: string;
+  totalGasUsedCrypto?: number;
+  totalGasUsedUsd?: number;
+  error?: string;
 }
 

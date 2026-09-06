@@ -1,6 +1,6 @@
 {
   "name": "Cross-Chain NFT Minting & Marketplace Studio",
-  "description": "Multi-chain NFT studio with wallet integration, cross-chain bridge and teleportation, gas fee estimation, AI metadata generation, bulk spreadsheet minting, and secondary marketplace with automated royalties.",
+  "description": "Multi-chain NFT studio with wallet integration, cross-chain bridge and teleportation, gas fee estimation, AI metadata generation, bulk spreadsheet minting, batch royalty management, and NFT rarity explorer with trait statistical analysis and collection rankings.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
