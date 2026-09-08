@@ -1,12 +1,11 @@
 -- Cloud SQL PostgreSQL schema for WIP Cross-Chain NFT App
--- Region: us-east1 (change if needed)
--- Enable pgcrypto for UUIDs
+-- Region: us-east1
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Collections across chains
 CREATE TABLE IF NOT EXISTS collections (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  chain VARCHAR(20) NOT NULL, -- ethereum, polygon, solana, arbitrum, base, avalanche
+  chain VARCHAR(20) NOT NULL,
   contract_address VARCHAR(100) NOT NULL,
   name VARCHAR(200) NOT NULL,
   symbol VARCHAR(20),
@@ -33,7 +32,7 @@ CREATE TABLE IF NOT EXISTS tokens (
   UNIQUE(collection_id, token_id)
 );
 
--- Traits for What-If Simulator + Rarity
+-- Traits
 CREATE TABLE IF NOT EXISTS traits (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   token_id UUID REFERENCES tokens(id) ON DELETE CASCADE,
@@ -44,18 +43,18 @@ CREATE TABLE IF NOT EXISTS traits (
 CREATE INDEX idx_traits_type_value ON traits(trait_type, trait_value);
 CREATE INDEX idx_traits_token ON traits(token_id);
 
--- Pre-computed trait counts for fast simulator
+-- Pre-computed trait counts
 CREATE TABLE IF NOT EXISTS trait_counts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
   trait_type VARCHAR(100) NOT NULL,
   trait_value VARCHAR(200) NOT NULL,
   count INT NOT NULL,
-  frequency DECIMAL(5,4), -- count / total_supply
+  frequency DECIMAL(5,4),
   UNIQUE(collection_id, trait_type, trait_value)
 );
 
--- Marketplace listings (Market tab)
+-- Marketplace listings
 CREATE TABLE IF NOT EXISTS listings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   token_id UUID REFERENCES tokens(id) ON DELETE CASCADE,
@@ -63,7 +62,7 @@ CREATE TABLE IF NOT EXISTS listings (
   chain VARCHAR(20) NOT NULL,
   price DECIMAL(20,8) NOT NULL,
   currency VARCHAR(10) DEFAULT 'ETH',
-  status VARCHAR(20) DEFAULT 'active', -- active, sold, cancelled
+  status VARCHAR(20) DEFAULT 'active',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -80,7 +79,7 @@ CREATE TABLE IF NOT EXISTS portfolio_cache (
   UNIQUE(wallet, token_id)
 );
 
--- Bridge jobs (Bridge tab)
+-- Bridge jobs
 CREATE TABLE IF NOT EXISTS bridge_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   token_id UUID REFERENCES tokens(id),
@@ -88,12 +87,12 @@ CREATE TABLE IF NOT EXISTS bridge_jobs (
   to_chain VARCHAR(20) NOT NULL,
   from_tx_hash VARCHAR(200),
   to_tx_hash VARCHAR(200),
-  status VARCHAR(20) DEFAULT 'pending', -- pending, locked, minted, completed, failed
+  status VARCHAR(20) DEFAULT 'pending',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Gas estimates cache (Gas tab)
+-- Gas estimates cache
 CREATE TABLE IF NOT EXISTS gas_cache (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   chain VARCHAR(20) NOT NULL,
@@ -103,7 +102,7 @@ CREATE TABLE IF NOT EXISTS gas_cache (
   UNIQUE(chain)
 );
 
--- View for rarity ranking carousel
+-- View for rarity ranking
 CREATE OR REPLACE VIEW rarity_ranking AS
 SELECT 
   t.id,
@@ -117,12 +116,11 @@ FROM tokens t
 JOIN collections c ON t.collection_id = c.id
 ORDER BY t.rarity_score DESC;
 
-
 -- === FEES: USDC fees, free for owner ===
 CREATE TABLE IF NOT EXISTS fee_config (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  action VARCHAR(50) NOT NULL UNIQUE, -- mint, bridge, list, trade
-  fee_usdc DECIMAL(10,2) NOT NULL, -- e.g. 1.00 = $1 USDC
+  action VARCHAR(50) NOT NULL UNIQUE,
+  fee_usdc DECIMAL(10,2) NOT NULL,
   enabled BOOLEAN DEFAULT true,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -131,7 +129,7 @@ INSERT INTO fee_config (action, fee_usdc) VALUES
   ('mint', 2.50),
   ('bridge', 1.50),
   ('list', 0.50),
-  ('trade', 2.5) -- 2.5% handled separately but stored
+  ('trade', 2.5)
 ON CONFLICT (action) DO NOTHING;
 
 -- Fee transactions log
@@ -154,3 +152,28 @@ CREATE TABLE IF NOT EXISTS owner_wallets (
   label VARCHAR(100),
   added_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- === DEPLOYED FEE COLLECTOR - LIVE 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E ===
+-- Deployed on Polygon Mainnet Block 93415806 - Tx success - Green check
+INSERT INTO owner_wallets (wallet, label) VALUES 
+  ('0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0', 'Account 16 - WIP Fees - feeWallet'),
+  ('0xbab06d358b181eb16e3189525bcc0bc4761a3762', 'Main Royalty - royaltyWallet')
+ON CONFLICT (wallet) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS deployed_contracts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,
+  address VARCHAR(100) NOT NULL,
+  chain VARCHAR(20) NOT NULL,
+  block_number BIGINT,
+  tx_hash VARCHAR(200),
+  fee_wallet VARCHAR(100),
+  royalty_wallet VARCHAR(100),
+  usdc_address VARCHAR(100),
+  deployed_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(chain, address)
+);
+
+INSERT INTO deployed_contracts (name, address, chain, block_number, tx_hash, fee_wallet, royalty_wallet, usdc_address) VALUES
+  ('WIPFeeCollectorV3_OneClick', '0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E', 'polygon', 93415806, '0x5a2...b45b1', '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0', '0xBaB06d358B181eB16e3189525BCc0bc4761a3762', '0x3c499c542cef5e3811e1192ce70d8cc03d5c3352')
+ON CONFLICT (chain, address) DO NOTHING;
