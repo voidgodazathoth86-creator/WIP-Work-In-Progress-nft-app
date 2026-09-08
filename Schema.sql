@@ -1,5 +1,6 @@
 -- Cloud SQL PostgreSQL schema for WIP Cross-Chain NFT App
 -- Region: us-east1
+-- LIVE DEPLOYED: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Collections across chains
@@ -153,11 +154,11 @@ CREATE TABLE IF NOT EXISTS owner_wallets (
   added_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- === DEPLOYED FEE COLLECTOR - LIVE 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E ===
--- Deployed on Polygon Mainnet Block 93415806 - Tx success - Green check
+-- === LIVE DEPLOYED FEE COLLECTOR - 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E ===
+-- Deployed on Polygon Block 93415806 - Green check success - Tx 0x5a2...b45b1
 INSERT INTO owner_wallets (wallet, label) VALUES 
-  ('0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0', 'Account 16 - WIP Fees - feeWallet'),
-  ('0xbab06d358b181eb16e3189525bcc0bc4761a3762', 'Main Royalty - royaltyWallet')
+  ('0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0', 'Account 16 - WIP Fees - feeWallet - YOU GET PAID'),
+  ('0xbab06d358b181eb16e3189525bcc0bc4761a3762', 'Main Royalty - royaltyWallet - separate')
 ON CONFLICT (wallet) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS deployed_contracts (
