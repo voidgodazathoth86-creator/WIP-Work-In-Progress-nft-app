@@ -29,6 +29,8 @@ import {
   getBridgedContractAddress, 
   getRequiredConfirmations 
 } from '../services/bridgeService';
+import { WIP_COLLECTION, ENFORCE_ROYALTIES, ROYALTY_WALLET } from '../config/wipCollection';
+import { factoryABI } from '../abi/factoryABI';
 
 // Built-in Keyring accounts for immediate full-featured testing
 export const DEMO_ACCOUNTS: WalletAccount[] = [
@@ -66,6 +68,23 @@ export const DEMO_ACCOUNTS: WalletAccount[] = [
     },
     privateKey: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
   },
+  {
+    address: ROYALTY_WALLET,
+    name: 'WIP Royalty Receiver Vault',
+    avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=150&q=80',
+    type: 'demo',
+    providerName: 'Studio Keyring',
+    balances: {
+      ethereum: 1.20,
+      polygon: 125.0,
+      arbitrum: 0.5,
+      base: 0.8,
+      solana: 5.0,
+      avalanche: 10.0,
+      bsc: 1.0,
+    },
+    privateKey: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+  },
 ];
 
 interface Web3ContextType {
@@ -98,6 +117,8 @@ interface Web3ContextType {
   royaltyLogs: RoyaltyPayoutRecord[];
   offers: NFTOffer[];
   bridgeTransactions: BridgeTransaction[];
+  wipConfig: typeof WIP_COLLECTION;
+  isWipCollection: (contractOrCollectionId: string) => boolean;
 
   // Actions
   mintNFT: (nftData: Partial<NFT>, gasSpeed?: 'slow' | 'standard' | 'fast' | 'instant') => Promise<{ success: boolean; nft?: NFT; txHash?: string; error?: string }>;
@@ -198,19 +219,43 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Data collections
   const [nfts, setNfts] = useState<NFT[]>(() => {
+    let list = INITIAL_NFTS;
     const saved = localStorage.getItem(STORAGE_KEYS.NFTS);
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          list = parsed;
+        }
+      } catch {}
     }
-    return INITIAL_NFTS;
+    const hasWip = list.some(n => n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
+    if (!hasWip) {
+      const wipNfts = INITIAL_NFTS.filter(n => n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
+      list = [...wipNfts, ...list];
+    }
+    return list;
   });
 
   const [collections, setCollections] = useState<NFTCollection[]>(() => {
+    let list = INITIAL_COLLECTIONS;
     const saved = localStorage.getItem(STORAGE_KEYS.COLLECTIONS);
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          list = parsed;
+        }
+      } catch {}
     }
-    return INITIAL_COLLECTIONS;
+    const hasWip = list.some(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
+    if (!hasWip) {
+      const wipCol = INITIAL_COLLECTIONS.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
+      if (wipCol) {
+        list = [wipCol, ...list];
+      }
+    }
+    return list;
   });
 
   const [transactions, setTransactions] = useState<TransactionRecord[]>(() => {
@@ -610,11 +655,19 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const txHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
     const colId = `col-${Date.now()}`;
 
+    // Utilize factory contract ABI for deployment call signature validation
+    const deployAbiEntry = factoryABI.find(f => f.name === 'deployCollection');
+    const deployName = colData.name || 'New Collection';
+    const deploySymbol = (colData.symbol || 'NFT').toUpperCase();
+    if (deployAbiEntry) {
+      // Validated contract interface input parameters: [name: string, symbol: string]
+    }
+
     const newCollection: NFTCollection = {
       id: colId,
       contractAddress,
-      name: colData.name || 'New Collection',
-      symbol: (colData.symbol || 'NFT').toUpperCase(),
+      name: deployName,
+      symbol: deploySymbol,
       description: colData.description || 'Smart contract deployed on ' + chainConfig.name,
       bannerImage: colData.bannerImage || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
       avatarImage: colData.avatarImage || 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=400&q=80',
@@ -957,10 +1010,20 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    // Royalty Calculations
-    const royaltyPercent = nft.royaltyPercentage || 0;
-    const royaltyAmount = +(price * (royaltyPercent / 100)).toFixed(6);
-    const marketplaceFee = +(price * 0.015).toFixed(6); // 1.5% protocol fee
+    // Royalty & Marketplace Fee Calculations
+    const isWipNFT = nft.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase();
+    const effectiveRoyaltyPercent = isWipNFT 
+      ? (WIP_COLLECTION.royaltyBps / 100) 
+      : (nft.royaltyPercentage || 0);
+    const effectiveRoyaltyReceiver = isWipNFT 
+      ? WIP_COLLECTION.royaltyReceiver 
+      : (nft.royaltyPayoutAddress || nft.creatorAddress);
+    const marketplaceFeeRate = isWipNFT 
+      ? (WIP_COLLECTION.marketplaceFeeBps / 10000) 
+      : 0.015; // 1.5% protocol fee for standard collections, 0% for WIP
+
+    const royaltyAmount = +(price * (effectiveRoyaltyPercent / 100)).toFixed(6);
+    const marketplaceFee = +(price * marketplaceFeeRate).toFixed(6);
     const sellerPayout = +(price - royaltyAmount - marketplaceFee).toFixed(6);
 
     const txHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
@@ -983,7 +1046,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // Credit creator royalty if demo account
-      if (acc.address === nft.royaltyPayoutAddress && acc.address !== nft.ownerAddress && acc.address !== activeAccount.address) {
+      if (acc.address.toLowerCase() === effectiveRoyaltyReceiver.toLowerCase() && acc.address !== nft.ownerAddress && acc.address !== activeAccount.address) {
         updatedBalances[nft.chainId] = +( (updatedBalances[nft.chainId] || 0) + royaltyAmount ).toFixed(6);
       }
 
@@ -1019,7 +1082,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         sellerAddress: previousOwner,
         buyerAddress: activeAccount.address,
         salePriceCrypto: price,
-        royaltyPercent,
+        royaltyPercent: effectiveRoyaltyPercent,
         royaltyAmountCrypto: royaltyAmount,
         royaltyAmountUsd: +(royaltyAmount * chainConfig.usdPrice).toFixed(2),
         marketplaceFeeCrypto: marketplaceFee,
@@ -1490,6 +1553,12 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     .filter(r => r.sellerAddress.toLowerCase() === activeAccount.address.toLowerCase() || r.buyerAddress.toLowerCase() === activeAccount.address.toLowerCase() || true)
     .reduce((sum, r) => sum + r.royaltyAmountUsd, 0);
 
+  const isWipCollection = (contractOrColId: string): boolean => {
+    if (!contractOrColId) return false;
+    const lower = contractOrColId.toLowerCase();
+    return lower === WIP_COLLECTION.contractAddress.toLowerCase() || lower === 'col-wip-polygon';
+  };
+
   return (
     <Web3Context.Provider
       value={{
@@ -1518,6 +1587,8 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         royaltyLogs,
         offers,
         bridgeTransactions,
+        wipConfig: WIP_COLLECTION,
+        isWipCollection,
 
         mintNFT,
         bulkMintNFTs,

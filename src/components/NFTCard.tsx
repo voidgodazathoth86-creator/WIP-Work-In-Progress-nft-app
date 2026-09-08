@@ -12,9 +12,10 @@ interface NFTCardProps {
 }
 
 export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) => {
-  const { activeAccount, toggleLikeNFT } = useWeb3();
+  const { activeAccount, toggleLikeNFT, isWipCollection } = useWeb3();
   const chainConfig = SUPPORTED_CHAINS[nft.chainId] || SUPPORTED_CHAINS.ethereum;
   const isOwner = nft.ownerAddress.toLowerCase() === activeAccount.address.toLowerCase();
+  const isWip = isWipCollection(nft.contractAddress) || isWipCollection(nft.collectionId || '');
 
   const handleLike = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -42,13 +43,20 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
           <span className="font-mono">{chainConfig.shortName}</span>
         </div>
 
-        {/* Royalty Pill */}
-        {nft.royaltyPercentage > 0 && (
-          <div className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-950/80 backdrop-blur-md border border-purple-500/30 text-[10px] font-bold text-purple-300 shadow-md">
-            <Percent className="w-2.5 h-2.5" />
-            <span>{nft.royaltyPercentage}% Royalty</span>
-          </div>
-        )}
+        {/* Royalty Pill / WIP Badge */}
+        <div className="absolute top-2.5 right-2.5 flex flex-col items-end gap-1">
+          {isWip && (
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-950/85 backdrop-blur-md border border-blue-500/40 text-[9px] font-bold text-blue-300 shadow-md font-mono">
+              <span>WIP • 10%</span>
+            </div>
+          )}
+          {nft.royaltyPercentage > 0 && !isWip && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-950/80 backdrop-blur-md border border-purple-500/30 text-[10px] font-bold text-purple-300 shadow-md">
+              <Percent className="w-2.5 h-2.5" />
+              <span>{nft.royaltyPercentage}% Royalty</span>
+            </div>
+          )}
+        </div>
 
         {/* Like Button & Views */}
         <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
