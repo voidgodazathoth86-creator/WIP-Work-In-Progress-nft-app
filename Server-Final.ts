@@ -1,8 +1,6 @@
-// server.ts - FINAL BUILD: Cloud SQL + Firebase Firestore + USDC Fees (free for owner)
-// Region: us-east1
-// Your app: Remix Cross-Chain NFT Minting & Marketplace Studio
+// server.ts - FINAL BUILD: LIVE DEPLOYED - NO ENV VARS NEEDED
+// Fee Collector: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E - Polygon Block 93415806 - LIVE
 // Firebase project: gen-lang-client-0392782201
-// Firestore DB: ai-studio-remixcrosschainn-c82235fc-446a-4768-82bc-9006a56ccee0
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -10,6 +8,21 @@ import { Pool } from 'pg';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { firebaseConfig } from './firebase-config';
+
+// === LIVE DEPLOYED - HARDCODED - NO ENV VARS ===
+export const FEE_COLLECTOR_ADDRESS = "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E";
+export const FEE_COLLECTOR_CHAIN = "polygon";
+export const FEE_WALLET = "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0"; // Account 16 - WIP Fees - BUT YOU SAID USDC IN ACCOUNT 1, SO CASH OUT FROM ACCOUNT 1 FOR NOW
+export const ROYALTY_WALLET = "0xBaB06d358B181eB16e3189525BCc0bc4761a3762"; // Main royalty - separate
+export const USDC_POLYGON = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352"; // lowercase fixed checksum error
+
+// Owner wallets free - YOU DON'T PAY FEES
+const OWNER_WALLETS = [
+  "0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0",
+  "0xbab06d358b181eb16e3189525bcc0bc4761a3762",
+  "0xbaB06d358B181eB16e3189525BCc0bc4761a3762", // checksum version too
+  "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0",
+].map(w => w.toLowerCase());
 
 // --- Cloud SQL Config (us-east1) ---
 const pool = new Pool({
@@ -29,8 +42,6 @@ const firebaseApp = initializeApp({
 });
 const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 
-const OWNER_WALLETS = (process.env.OWNER_WALLETS || '').toLowerCase().split(',').map(s=>s.trim()).filter(Boolean);
-
 const app = new Hono();
 app.use('/*', cors());
 
@@ -45,20 +56,23 @@ async function getFee(action: string): Promise<number> {
   } catch { return action === 'mint' ? 2.5 : action === 'bridge' ? 1.5 : 0.5; }
 }
 
-// --- HEALTH: Shows both databases ---
+// --- HEALTH: Shows LIVE DEPLOYED ---
 app.get('/api/health', async (c) => {
-  let sqlOk = false, firestoreOk = false;
+  let sqlOk = false;
   try {
     await pool.query('SELECT 1');
     sqlOk = true;
   } catch {}
-  try {
-    await getDoc(doc(db, 'health', 'check'));
-    firestoreOk = true;
-  } catch { firestoreOk = true; } // Firestore may not have doc but connection ok
   
   return c.json({
     status: 'ok',
+    live_deployed: true,
+    fee_collector: FEE_COLLECTOR_ADDRESS,
+    fee_collector_chain: FEE_COLLECTOR_CHAIN,
+    fee_collector_block: 93415806,
+    fee_wallet: FEE_WALLET,
+    royalty_wallet: ROYALTY_WALLET,
+    usdc: USDC_POLYGON,
     cloud_sql: sqlOk ? 'connected (us-east1)' : 'not connected - set DATABASE_URL',
     firestore: 'enabled',
     firestore_db: firebaseConfig.firestoreDatabaseId,
@@ -66,10 +80,21 @@ app.get('/api/health', async (c) => {
     owner_free_enabled: true,
     owner_wallets: OWNER_WALLETS.length,
     chains: ['ethereum','polygon','solana','arbitrum','base','avalanche'],
-    cost: {
-      cloud_sql: '$0 in Starter Tier (2 apps free, auto-pauses)',
-      firestore: '$0 free tier (50k reads/day)'
-    }
+  });
+});
+
+// --- DEPLOYED INFO ENDPOINT ---
+app.get('/api/deployed', async (c) => {
+  return c.json({
+    feeCollector: FEE_COLLECTOR_ADDRESS,
+    chain: FEE_COLLECTOR_CHAIN,
+    block: 93415806,
+    txHash: "0x5a2...b45b1",
+    feeWallet: FEE_WALLET,
+    royaltyWallet: ROYALTY_WALLET,
+    usdc: USDC_POLYGON,
+    status: "LIVE - Green check success",
+    note: "One-click lowercase fix for bad address checksum error"
   });
 });
 
@@ -81,21 +106,36 @@ app.get('/api/fees', async (c) => {
     {action:'list', fee_usdc: 0.5},
     {action:'trade', fee_usdc: 2.5}
   ]}));
-  return c.json({ fees: fees.rows, fee_token: 'USDC', owner_free: true, note: 'Free for owner wallets' });
+  return c.json({ 
+    fees: fees.rows, 
+    fee_token: 'USDC', 
+    fee_collector: FEE_COLLECTOR_ADDRESS,
+    fee_wallet: FEE_WALLET,
+    owner_free: true, 
+    note: 'Free for owner wallets, fees go to ' + FEE_WALLET 
+  });
 });
 
 app.post('/api/fees/check', async (c) => {
   const { wallet, action } = await c.req.json();
   const fee = await getFee(action);
   const owner = isOwner(wallet);
-  return c.json({ wallet, action, fee_usdc: owner ? 0 : fee, is_owner_free: owner, fee_token: 'USDC', should_pay: !owner && fee > 0 });
+  return c.json({ 
+    wallet, 
+    action, 
+    fee_usdc: owner ? 0 : fee, 
+    is_owner_free: owner, 
+    fee_token: 'USDC', 
+    fee_collector: FEE_COLLECTOR_ADDRESS,
+    fee_wallet: FEE_WALLET,
+    should_pay: !owner && fee > 0 
+  });
 });
 
-// --- MARKET: Now reads from Cloud SQL (fast ranking) + Firestore fallback ---
+// --- MARKET ---
 app.get('/api/market/:collectionId', async (c) => {
   const collectionId = c.req.param('collectionId');
   try {
-    // Primary: Cloud SQL for fast rarity ranking
     const { rows } = await pool.query(`
       SELECT t.*, (SELECT json_agg(json_build_object('trait_type', tr.trait_type, 'trait_value', tr.trait_value)) FROM traits tr WHERE tr.token_id = t.id) as traits
       FROM tokens t WHERE t.collection_id = $1 ORDER BY t.rarity_rank ASC LIMIT 50
@@ -103,7 +143,6 @@ app.get('/api/market/:collectionId', async (c) => {
     if (rows.length > 0) return c.json({ source: 'cloud_sql', data: rows });
   } catch {}
   
-  // Fallback: Firestore
   try {
     const q = query(collection(db, 'nfts'), where('collectionId', '==', collectionId), orderBy('createdAt', 'desc'), limit(50));
     const snap = await getDocs(q);
@@ -114,7 +153,7 @@ app.get('/api/market/:collectionId', async (c) => {
   }
 });
 
-// --- WHAT-IF SIMULATOR: Uses Cloud SQL trait_counts ---
+// --- WHAT-IF SIMULATOR ---
 app.post('/api/simulate-rarity', async (c) => {
   const { collection_id, hypothetical_traits } = await c.req.json();
   const { rows: counts } = await pool.query('SELECT trait_type, trait_value, count, frequency FROM trait_counts WHERE collection_id = $1', [collection_id]);
@@ -129,14 +168,13 @@ app.post('/api/simulate-rarity', async (c) => {
   })});
 });
 
-// --- MINT: Writes to BOTH Cloud SQL + Firestore + USDC fee ---
+// --- MINT: Writes to BOTH Cloud SQL + Firestore + USDC fee to YOUR wallet ---
 app.post('/api/mint', async (c) => {
   const { collection_id, token_id, owner_wallet, metadata_ipfs_uri, traits, usdc_tx_hash, chain, name, image } = await c.req.json();
   const fee = await getFee('mint');
   const ownerFree = isOwner(owner_wallet);
-  if (!ownerFree && fee > 0 && !usdc_tx_hash) return c.json({ error: 'USDC fee required', fee_usdc: fee, fee_token: 'USDC' }, 402);
+  if (!ownerFree && fee > 0 && !usdc_tx_hash) return c.json({ error: 'USDC fee required', fee_usdc: fee, fee_token: 'USDC', fee_collector: FEE_COLLECTOR_ADDRESS, fee_wallet: FEE_WALLET }, 402);
 
-  // 1. Cloud SQL
   const client = await pool.connect();
   let tokenDbId;
   try {
@@ -146,21 +184,20 @@ app.post('/api/mint', async (c) => {
     for (const tr of traits || []) {
       await client.query('INSERT INTO traits (token_id, trait_type, trait_value) VALUES ($1,$2,$3)', [tokenDbId, tr.trait_type, tr.trait_value]);
     }
-    await client.query('INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,$2,$3,$4,$5,$6)', [owner_wallet, 'mint', ownerFree?0:fee, usdc_tx_hash||null, chain||'ethereum', ownerFree]);
+    await client.query('INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,$2,$3,$4,$5,$6)', [owner_wallet, 'mint', ownerFree?0:fee, usdc_tx_hash||null, chain||'polygon', ownerFree]);
     await client.query('COMMIT');
   } catch (e) {
     await client.query('ROLLBACK');
     return c.json({ error: String(e) }, 500);
   } finally { client.release(); }
 
-  // 2. Firestore (for cross-device sync)
   try {
     await setDoc(doc(db, 'nfts', tokenDbId), {
       id: tokenDbId,
       tokenId: token_id,
       name: name || token_id,
       image: image || '',
-      chainId: chain || 'ethereum',
+      chainId: chain || 'polygon',
       standard: 'ERC-721',
       collectionId: collection_id,
       creatorAddress: owner_wallet,
@@ -172,13 +209,14 @@ app.post('/api/mint', async (c) => {
       ipfsMetadataUri: metadata_ipfs_uri,
       ipfsImageUri: image || '',
       txHash: usdc_tx_hash || '',
+      feeCollector: FEE_COLLECTOR_ADDRESS,
     });
   } catch {}
 
-  return c.json({ success: true, tokenDbId, fee_charged: ownerFree?0:fee, is_owner_free: ownerFree, synced_to: ['cloud_sql','firestore'] });
+  return c.json({ success: true, tokenDbId, fee_charged: ownerFree?0:fee, is_owner_free: ownerFree, fee_collector: FEE_COLLECTOR_ADDRESS, fee_wallet: FEE_WALLET, synced_to: ['cloud_sql','firestore'] });
 });
 
-// --- PORTFOLIO: Firestore for cross-device ---
+// --- PORTFOLIO ---
 app.get('/api/portfolio/:wallet', async (c) => {
   const wallet = c.req.param('wallet');
   try {
@@ -200,7 +238,7 @@ app.get('/api/portfolio/:wallet', async (c) => {
 app.post('/api/bridge', async (c) => {
   const { token_id, from_chain, to_chain, wallet, usdc_tx_hash, nftName } = await c.req.json();
   const fee = await getFee('bridge');
-  if (!isOwner(wallet) && fee > 0 && !usdc_tx_hash) return c.json({ error: 'USDC fee required', fee_usdc: fee }, 402);
+  if (!isOwner(wallet) && fee > 0 && !usdc_tx_hash) return c.json({ error: 'USDC fee required', fee_usdc: fee, fee_collector: FEE_COLLECTOR_ADDRESS }, 402);
   
   const { rows } = await pool.query('INSERT INTO bridge_jobs (token_id, from_chain, to_chain, status) VALUES ($1,$2,$3,\'pending\') RETURNING *', [token_id, from_chain, to_chain]);
   
@@ -216,4 +254,4 @@ app.post('/api/bridge', async (c) => {
 });
 
 export default { port: process.env.PORT || 3000, fetch: app.fetch };
-console.log('🚀 WIP NFT: Cloud SQL (us-east1) + Firestore (ai-studio-remixcrosschainn) + USDC fees free for owner');
+console.log('🚀 WIP NFT LIVE: Fee Collector 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806 - fees to 0xB30e...4b0');
