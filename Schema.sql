@@ -202,3 +202,28 @@ INSERT INTO collections (chain, contract_address, name, symbol, total_supply) VA
   ('polygon', '0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9', 'Work-In-Progress-NFTs', 'WIP', 1),
   ('polygon', '0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6', 'WIP Logo Collection', 'WIPLOGO', 1)
 ON CONFLICT (chain, contract_address) DO NOTHING;
+
+-- === SITE LINKS - Website, Socials, Blog, Newsletter ===
+CREATE TABLE IF NOT EXISTS site_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key VARCHAR(50) NOT NULL, -- website, twitter, instagram, blog, newsletter, etc.
+  category VARCHAR(20) NOT NULL, -- website, social, blog, newsletter
+  label VARCHAR(100) NOT NULL,
+  url TEXT,
+  enabled BOOLEAN DEFAULT false,
+  status VARCHAR(20) DEFAULT 'Coming Soon', -- Live, Coming Soon
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(key)
+);
+
+INSERT INTO site_links (key, category, label, url, enabled, status) VALUES
+  ('website', 'website', 'Official Website', '', false, 'Coming Soon'),
+  ('twitter', 'social', 'X / Twitter', '', false, 'Coming Soon'),
+  ('instagram', 'social', 'Instagram', '', false, 'Coming Soon'),
+  ('discord', 'social', 'Discord', '', false, 'Coming Soon'),
+  ('tiktok', 'social', 'TikTok', '', false, 'Coming Soon'),
+  ('youtube', 'social', 'YouTube', '', false, 'Coming Soon'),
+  ('blog', 'blog', 'Blog', '', false, 'Coming Soon'),
+  ('newsletter', 'newsletter', 'Newsletter', '', false, 'Coming Soon')
+ON CONFLICT (key) DO NOTHING;
