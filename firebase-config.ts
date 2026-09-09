@@ -21,4 +21,3 @@ export const FIRESTORE_COLLECTIONS = {
   portfolios: "portfolios",
   favorites: "favorites"
 };
-
