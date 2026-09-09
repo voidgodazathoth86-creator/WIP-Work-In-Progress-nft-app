@@ -439,5 +439,43 @@ app.get('/api/transactions/:wallet', async (c) => {
   } catch { return c.json([]); }
 });
 
+// === SITE LINKS - Website, Socials, Blog, Newsletter ===
+app.get('/api/site-links', async (c) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM site_links ORDER BY category, label');
+    if (rows.length) {
+      // Group by category
+      const grouped: any = { website: null, socials: {}, blog: null, newsletter: null };
+      for (const r of rows) {
+        if (r.category === 'website') grouped.website = r;
+        else if (r.category === 'social') grouped.socials[r.key] = r;
+        else if (r.category === 'blog') grouped.blog = r;
+        else if (r.category === 'newsletter') grouped.newsletter = r;
+      }
+      return c.json({ source: 'db', links: grouped, all: rows });
+    }
+  } catch {}
+  // Fallback hardcoded - update in deployed-config.ts when you build them
+  return c.json({
+    source: 'hardcoded',
+    links: {
+      website: { url: "", label: "Website", enabled: false, status: "Coming Soon" },
+      socials: {
+        twitter: { url: "", label: "X / Twitter", enabled: false, status: "Coming Soon" },
+        instagram: { url: "", label: "Instagram", enabled: false, status: "Coming Soon" },
+        discord: { url: "", label: "Discord", enabled: false, status: "Coming Soon" },
+      },
+      blog: { url: "", label: "Blog", enabled: false, status: "Coming Soon" },
+      newsletter: { url: "", label: "Newsletter", enabled: false, status: "Coming Soon" },
+    },
+    note: "Update deployed-config.ts SITE_LINKS when your site/socials/blog/newsletter are live"
+  });
+});
+
+app.get('/api/links', async (c) => {
+  // Alias for /api/site-links
+  return c.req.param ? c.json({ redirect: '/api/site-links' }) : c.json({ message: "Use /api/site-links" });
+});
+
 export default { port: Number(process.env.PORT) || 3000, fetch: app.fetch };
 console.log('🚀 WIP NFT LIVE FULL 430+ - Fee Collector 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Block 93415806 - fees to 0xB30e...4b0 - Collections WIP + WIPLOGO LIVE');
