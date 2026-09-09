@@ -130,8 +130,26 @@ INSERT INTO fee_config (action, fee_usdc) VALUES
   ('mint', 2.50),
   ('bridge', 1.50),
   ('list', 0.50),
-  ('trade', 2.5)
+  ('trade', 2.5),
+  ('app_access', 5.00),
+  ('app_monthly', 9.99),
+  ('app_lifetime', 49.99)
 ON CONFLICT (action) DO NOTHING;
+
+-- App access subscriptions (paywall)
+CREATE TABLE IF NOT EXISTS app_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet VARCHAR(100) NOT NULL UNIQUE,
+  plan VARCHAR(20) NOT NULL,
+  fee_usdc DECIMAL(10,2) NOT NULL,
+  tx_hash VARCHAR(200) NOT NULL,
+  chain VARCHAR(20) DEFAULT 'polygon',
+  expires_at TIMESTAMPTZ,
+  is_owner_free BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_app_sub_wallet ON app_subscriptions(wallet);
+CREATE INDEX idx_app_sub_expires ON app_subscriptions(expires_at);
 
 -- Fee transactions log
 CREATE TABLE IF NOT EXISTS fee_transactions (
