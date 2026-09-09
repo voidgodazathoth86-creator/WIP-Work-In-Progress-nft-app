@@ -14,7 +14,7 @@ export const OWNER_WALLETS = [
 ];
 export const DEPLOYED_COLLECTIONS = [
   { name: "Work-In-Progress-NFTs", symbol: "WIP", address: "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9", chain: "polygon", source: "thirdweb", hasNFTs: true, description: "Main WIP collection" },
-  { name: "WIP Logo Collection", symbol: "WIPLOGO", address: "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6", chain: "polygon", source: "wipfactory", hasNFTs: false, description: "Logo collection - empty" }
+  { name: "WIP Logo Collection", symbol: "WIPLOGO", address: "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6", chain: "polygon", source: "wipfactory", hasNFTs: true, description: "WIP Logo Collection - LIVE" }
 ];
 export const WIP_COLLECTION_ADDRESS = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
 export const LOGO_COLLECTION_ADDRESS = "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6";
