@@ -178,3 +178,9 @@ CREATE TABLE IF NOT EXISTS deployed_contracts (
 INSERT INTO deployed_contracts (name, address, chain, block_number, tx_hash, fee_wallet, royalty_wallet, usdc_address) VALUES
   ('WIPFeeCollectorV3_OneClick', '0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E', 'polygon', 93415806, '0x5a2...b45b1', '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0', '0xBaB06d358B181eB16e3189525BCc0bc4761a3762', '0x3c499c542cef5e3811e1192ce70d8cc03d5c3352')
 ON CONFLICT (chain, address) DO NOTHING;
+
+-- === YOUR LIVE COLLECTIONS - BOTH ADDED - DO NOT REMOVE ===
+INSERT INTO collections (chain, contract_address, name, symbol, total_supply) VALUES
+  ('polygon', '0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9', 'Work-In-Progress-NFTs', 'WIP', 0),
+  ('polygon', '0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6', 'WIP Logo Collection', 'WIPLOGO', 0)
+ON CONFLICT (chain, contract_address) DO NOTHING;
