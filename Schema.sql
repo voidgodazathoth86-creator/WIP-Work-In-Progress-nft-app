@@ -181,6 +181,6 @@ ON CONFLICT (chain, address) DO NOTHING;
 
 -- === YOUR LIVE COLLECTIONS - BOTH ADDED - DO NOT REMOVE ===
 INSERT INTO collections (chain, contract_address, name, symbol, total_supply) VALUES
-  ('polygon', '0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9', 'Work-In-Progress-NFTs', 'WIP', 0),
-  ('polygon', '0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6', 'WIP Logo Collection', 'WIPLOGO', 0)
+  ('polygon', '0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9', 'Work-In-Progress-NFTs', 'WIP', 1),
+  ('polygon', '0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6', 'WIP Logo Collection', 'WIPLOGO', 1)
 ON CONFLICT (chain, contract_address) DO NOTHING;
