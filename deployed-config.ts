@@ -18,3 +18,32 @@ export const DEPLOYED_COLLECTIONS = [
 ];
 export const WIP_COLLECTION_ADDRESS = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
 export const LOGO_COLLECTION_ADDRESS = "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6";
+
+// === NEW: EXTERNAL LINKS - Website, Socials, Blog & Newsletter ===
+// These are placeholders - update when you build them, app will auto-show
+export const SITE_LINKS = {
+  website: {
+    url: "", // e.g. "https://workinprogress.art" - leave empty for "Coming Soon"
+    label: "Website",
+    enabled: false, // set true when website is live
+  },
+  socials: {
+    twitter: { url: "", label: "X / Twitter", enabled: false },
+    instagram: { url: "", label: "Instagram", enabled: false },
+    discord: { url: "", label: "Discord", enabled: false },
+    tiktok: { url: "", label: "TikTok", enabled: false },
+    youtube: { url: "", label: "YouTube", enabled: false },
+    // add more as needed
+  },
+  blog: {
+    url: "", // e.g. "https://blog.workinprogress.art" or Medium/Hashnode
+    label: "Blog",
+    enabled: false,
+  },
+  newsletter: {
+    url: "", // e.g. "https://newsletter.workinprogress.art" or Substack/Beehiiv
+    label: "Newsletter",
+    enabled: false,
+    embedEnabled: false, // set true to show email capture in footer
+  },
+};
