@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Web3Provider, useWeb3 } from './context/Web3Context';
+import { ThemeProvider } from './context/ThemeContext';
 import { Navbar } from './components/Navbar';
+import { ThemeSwitcher } from './components/ThemeSwitcher';
 import { Marketplace } from './components/Marketplace';
 import { MintStudio } from './components/MintStudio';
 import { Dashboard } from './components/Dashboard';
@@ -115,6 +117,9 @@ function AppContent() {
             <button onClick={() => setCurrentTab('dashboard')} className="hover:text-purple-400 transition-colors">
               Royalty Ledger
             </button>
+            <div className="border-l border-zinc-800 pl-4 ml-1 hidden sm:block">
+              <ThemeSwitcher variant="pill" />
+            </div>
           </div>
         </div>
       </footer>
@@ -146,8 +151,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <Web3Provider>
-      <AppContent />
-    </Web3Provider>
+    <ThemeProvider>
+      <Web3Provider>
+        <AppContent />
+      </Web3Provider>
+    </ThemeProvider>
   );
 }

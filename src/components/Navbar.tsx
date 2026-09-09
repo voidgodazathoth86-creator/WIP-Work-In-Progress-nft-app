@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { formatCrypto, formatUsd } from '../services/gasService';
 import { BlockchainNetwork } from '../types';
+import { ThemeSwitcher } from './ThemeSwitcher';
 
 interface NavbarProps {
   currentTab: 'marketplace' | 'mint' | 'collections' | 'dashboard' | 'gas-hub' | 'bridge';
@@ -269,6 +270,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Droplet className="w-3.5 h-3.5 text-indigo-400" />
               <span>Faucet</span>
             </button>
+
+            {/* Theme Switcher Toggle */}
+            <ThemeSwitcher />
 
             {/* Wallet Connect / Account Button */}
             {isConnected ? (
