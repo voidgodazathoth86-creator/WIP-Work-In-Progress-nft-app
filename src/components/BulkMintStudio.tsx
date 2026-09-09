@@ -60,6 +60,7 @@ import { formatCrypto, formatUsd } from '../services/gasService';
 import { generateArtSVG, generateSeedAttributes } from '../services/generativeArt';
 import Papa from 'papaparse';
 import confetti from 'canvas-confetti';
+import { NetworkSelectorDropdown } from './NetworkSelectorDropdown';
 
 interface BulkMintStudioProps {
   onNavigateToDashboard?: () => void;
@@ -724,9 +725,10 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
               <FolderPlus className="w-4 h-4 text-cyan-400" />
               1. Collection & Target Smart Contract Destination
             </label>
-            <span className="text-[11px] font-mono text-zinc-500">
-              Chain: <strong className="text-cyan-400">{currentChainConfig.name}</strong>
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-zinc-500 hidden sm:inline">Network to Mint To:</span>
+              <NetworkSelectorDropdown variant="compact" id="bulk-mint-target-network" />
+            </div>
           </div>
 
           {/* Mode Selector Tabs */}

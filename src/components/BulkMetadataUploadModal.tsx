@@ -16,9 +16,12 @@ import {
   ChevronRight,
   Sliders,
   Zap,
-  X
+  X,
+  Download,
+  Table
 } from 'lucide-react';
 import { NFTTrait, TokenStandard } from '../types';
+import { parseSpreadsheetFile, parseCSVText, downloadCSVTemplate } from '../services/spreadsheetService';
 
 export interface ParsedAssetItem {
   name: string;
@@ -61,7 +64,7 @@ const SAMPLE_METADATA_JSON = `[
     "royaltyPercentage": 7.5,
     "traits": [
       { "trait_type": "Faction", "value": "Iron Citadel" },
-      { "trait_type": "Cyberware", "value": "Titanium Exo-Frame" },
+      { "trait_type": "Cyberware", "value": "Titan Exo-Frame" },
       { "trait_type": "Rarity Tier", "value": "Legendary" },
       { "trait_type": "Power Level", "value": 92, "display_type": "number" }
     ],
@@ -82,6 +85,11 @@ const SAMPLE_METADATA_JSON = `[
     "unlockableContent": "Vault Pass: VALK-SOLAR-003 | VIP community pass"
   }
 ]`;
+
+const SAMPLE_METADATA_CSV = `name,description,image,price,royalty,category,unlockable,Trait: Faction,Trait: Rarity Tier,Trait: Power Level
+Cyber Samurai #001,"Master of the neon katana and kinetic shields.",https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80,0.08,7.5,art,"Vault Pass: KYOTO-NEON-001",Shadow Ronin,Mythic,98
+Aegis Sentinel #002,"Heavy-armored bio-mechanical guardian.",https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=800&q=80,0.06,7.5,art,"Vault Pass: AEGIS-SENT-002",Iron Citadel,Legendary,92
+Chroma Valkyrie #003,"Aerial vanguard commanding photon blasters.",https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=800&q=80,0.075,5.0,art,"Vault Pass: VALK-SOLAR-003",Solaris Guild,Epic,89`;
 
 const SAMPLE_OPEN_SEA_STANDARD_JSON = `{
   "name": "Nexus Genesis Archon #777",
@@ -104,12 +112,13 @@ export const BulkMetadataUploadModal: React.FC<{
   onApplySingleItem: (item: ParsedAssetItem) => void;
   onSendToBulkStudio?: (items: ParsedAssetItem[]) => void;
 }> = ({ isOpen, onClose, onApplySingleItem, onSendToBulkStudio }) => {
-  const [jsonText, setJsonText] = useState('');
+  const [inputText, setInputText] = useState('');
   const [parsedItems, setParsedItems] = useState<ParsedAssetItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'paste' | 'upload' | 'samples'>('paste');
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'upload' | 'paste' | 'samples'>('upload');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -224,36 +233,88 @@ export const BulkMetadataUploadModal: React.FC<{
   const handleParseText = () => {
     setError(null);
     setSuccessMsg(null);
+    const trimmed = inputText.trim();
+    if (!trimmed) {
+      setError('Please paste or type metadata to parse.');
+      return;
+    }
+
     try {
-      const items = parseJsonData(jsonText);
-      setParsedItems(items);
-      setSelectedIndex(0);
-      setSuccessMsg(`Successfully parsed ${items.length} ${items.length === 1 ? 'asset' : 'assets'} from JSON metadata!`);
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        // Parse as JSON
+        const items = parseJsonData(trimmed);
+        setParsedItems(items);
+        setSelectedIndex(0);
+        setSuccessMsg(`Successfully parsed ${items.length} ${items.length === 1 ? 'asset' : 'assets'} from JSON metadata!`);
+      } else {
+        // Parse as CSV/TSV
+        const bulkNFTs = parseCSVText(trimmed);
+        if (bulkNFTs.length === 0) {
+          throw new Error('No valid NFT rows could be parsed from the CSV text.');
+        }
+        const mappedItems: ParsedAssetItem[] = bulkNFTs.map(b => ({
+          name: b.name,
+          description: b.description,
+          image: b.image,
+          price: b.price,
+          royaltyPercentage: b.royaltyPercentage,
+          traits: b.traits,
+          unlockableContent: b.unlockableContent,
+          category: b.category,
+        }));
+        setParsedItems(mappedItems);
+        setSelectedIndex(0);
+        setSuccessMsg(`Successfully parsed ${mappedItems.length} ${mappedItems.length === 1 ? 'asset' : 'assets'} from CSV text!`);
+      }
     } catch (e: any) {
-      setError(e.message || 'Failed to parse JSON');
+      setError(e.message || 'Failed to parse metadata');
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setError(null);
     setSuccessMsg(null);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        setJsonText(text);
+    setIsProcessing(true);
+
+    try {
+      const fileName = file.name.toLowerCase();
+      if (fileName.endsWith('.json')) {
+        const text = await file.text();
+        setInputText(text);
         const items = parseJsonData(text);
         setParsedItems(items);
         setSelectedIndex(0);
-        setSuccessMsg(`Loaded and parsed ${items.length} assets from "${file.name}"!`);
-      } catch (err: any) {
-        setError(`Failed to parse file: ${err.message}`);
+        setSuccessMsg(`Loaded and parsed ${items.length} assets from JSON "${file.name}"!`);
+      } else {
+        // Handles CSV, XLSX, XLS
+        const bulkNFTs = await parseSpreadsheetFile(file);
+        if (!bulkNFTs || bulkNFTs.length === 0) {
+          throw new Error('No valid NFT metadata rows were found in the uploaded file.');
+        }
+        const mappedItems: ParsedAssetItem[] = bulkNFTs.map(b => ({
+          name: b.name,
+          description: b.description,
+          image: b.image,
+          price: b.price,
+          royaltyPercentage: b.royaltyPercentage,
+          traits: b.traits,
+          unlockableContent: b.unlockableContent,
+          category: b.category,
+        }));
+        setParsedItems(mappedItems);
+        setSelectedIndex(0);
+        setSuccessMsg(`Successfully loaded ${mappedItems.length} NFTs from "${file.name}"! Ready to batch mint or auto-fill.`);
       }
-    };
-    reader.readAsText(file);
+    } catch (err: any) {
+      setError(`Failed to parse file: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessing(false);
+      // reset input so re-selecting same file triggers onChange
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleApplyCurrent = (itemToApply?: ParsedAssetItem) => {
@@ -263,17 +324,39 @@ export const BulkMetadataUploadModal: React.FC<{
     onClose();
   };
 
-  const handleLoadSample = (sampleType: 'array' | 'opensea') => {
-    const sample = sampleType === 'array' ? SAMPLE_METADATA_JSON : SAMPLE_OPEN_SEA_STANDARD_JSON;
-    setJsonText(sample);
-    try {
-      const items = parseJsonData(sample);
-      setParsedItems(items);
-      setSelectedIndex(0);
-      setError(null);
-      setSuccessMsg(`Loaded sample: ${sampleType === 'array' ? '3-Item Cyberpunk Batch' : 'OpenSea / EIP Metadata Standard'}`);
-    } catch (e: any) {
-      setError(e.message);
+  const handleLoadSample = (sampleType: 'array' | 'csv' | 'opensea') => {
+    setError(null);
+    if (sampleType === 'csv') {
+      setInputText(SAMPLE_METADATA_CSV);
+      try {
+        const bulkNFTs = parseCSVText(SAMPLE_METADATA_CSV);
+        const mappedItems: ParsedAssetItem[] = bulkNFTs.map(b => ({
+          name: b.name,
+          description: b.description,
+          image: b.image,
+          price: b.price,
+          royaltyPercentage: b.royaltyPercentage,
+          traits: b.traits,
+          unlockableContent: b.unlockableContent,
+          category: b.category,
+        }));
+        setParsedItems(mappedItems);
+        setSelectedIndex(0);
+        setSuccessMsg('Loaded 3-Item CSV Metadata Sample!');
+      } catch (e: any) {
+        setError(e.message);
+      }
+    } else {
+      const sample = sampleType === 'array' ? SAMPLE_METADATA_JSON : SAMPLE_OPEN_SEA_STANDARD_JSON;
+      setInputText(sample);
+      try {
+        const items = parseJsonData(sample);
+        setParsedItems(items);
+        setSelectedIndex(0);
+        setSuccessMsg(`Loaded sample: ${sampleType === 'array' ? '3-Item Cyberpunk Batch (JSON)' : 'OpenSea / EIP Metadata Standard'}`);
+      } catch (e: any) {
+        setError(e.message);
+      }
     }
   };
 
@@ -293,18 +376,18 @@ export const BulkMetadataUploadModal: React.FC<{
         {/* Header */}
         <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/80">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-md shadow-cyan-500/20 text-white">
-              <FileCode className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-600 flex items-center justify-center shadow-md shadow-emerald-500/20 text-white">
+              <FileSpreadsheet className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base font-bold text-zinc-100 flex items-center gap-2">
-                <span>Bulk Metadata JSON Parser & Auto-Fill</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                  OpenSea / ERC-721 Compliant
+                <span>Bulk Metadata & CSV Upload</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  CSV / Excel / JSON
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Upload or paste structured JSON metadata to instantly auto-populate single asset forms or multi-item batches.
+                Upload a CSV, Excel, or JSON spreadsheet to define multiple NFT metadata fields simultaneously and generate batch transactions.
               </p>
             </div>
           </div>
@@ -324,6 +407,17 @@ export const BulkMetadataUploadModal: React.FC<{
           <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setActiveTab('upload')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeTab === 'upload' 
+                    ? 'bg-zinc-800 text-emerald-400 border border-zinc-700' 
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                Upload File (CSV / XLSX / JSON)
+              </button>
+              <button
                 onClick={() => setActiveTab('paste')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                   activeTab === 'paste' 
@@ -332,18 +426,7 @@ export const BulkMetadataUploadModal: React.FC<{
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
-                Paste JSON
-              </button>
-              <button
-                onClick={() => setActiveTab('upload')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  activeTab === 'upload' 
-                    ? 'bg-zinc-800 text-cyan-400 border border-zinc-700' 
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <UploadCloud className="w-3.5 h-3.5" />
-                Upload JSON File
+                Paste Raw Data
               </button>
               <button
                 onClick={() => setActiveTab('samples')}
@@ -358,39 +441,105 @@ export const BulkMetadataUploadModal: React.FC<{
               </button>
             </div>
 
-            {parsedItems.length > 0 && (
-              <div className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-                {parsedItems.length} {parsedItems.length === 1 ? 'Asset Loaded' : 'Assets Loaded'}
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => downloadCSVTemplate()}
+                className="text-[11px] font-bold text-zinc-400 hover:text-emerald-300 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-emerald-500/40 transition-all"
+                title="Download standard CSV header template"
+              >
+                <Download className="w-3 h-3 text-emerald-400" />
+                <span>Download CSV Template</span>
+              </button>
+
+              {parsedItems.length > 0 && (
+                <div className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                  {parsedItems.length} {parsedItems.length === 1 ? 'Asset Loaded' : 'Assets Loaded'}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Tab 1: Direct JSON Paste */}
+          {/* Tab 1: Upload File (CSV, XLSX, XLS, JSON) */}
+          {activeTab === 'upload' && (
+            <div className="space-y-3">
+              <div 
+                onClick={() => !isProcessing && fileInputRef.current?.click()}
+                className="p-8 border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 bg-zinc-950/60 hover:bg-zinc-950 rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all text-center group"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <FileSpreadsheet className="w-7 h-7" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-zinc-200">
+                    {isProcessing ? 'Processing File...' : 'Click to Browse or Drag & Drop File Here'}
+                  </div>
+                  <div className="text-xs text-zinc-400 mt-1">
+                    Supports <strong className="text-emerald-400">.csv</strong>, <strong className="text-emerald-400">.xlsx</strong>, <strong className="text-emerald-400">.xls</strong>, and <strong className="text-cyan-400">.json</strong> metadata files
+                  </div>
+                  <div className="text-[11px] text-zinc-500 mt-1">
+                    Columns: Name, Description, Image URL, Price, Royalty, Unlockable, Trait: [Name]
+                  </div>
+                </div>
+              </div>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".csv,.xlsx,.xls,.json,.txt"
+                className="hidden"
+              />
+
+              <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950/50 border border-zinc-800 text-xs text-zinc-400">
+                <span className="flex items-center gap-1.5">
+                  <HelpCircle className="w-3.5 h-3.5 text-emerald-400" />
+                  Need a pre-formatted template? Download our CSV headers to start filling your NFT attributes.
+                </span>
+                <button
+                  onClick={() => downloadCSVTemplate()}
+                  className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 underline underline-offset-2 shrink-0 ml-2"
+                >
+                  <Download className="w-3 h-3" /> Get CSV Template
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Direct Paste (CSV or JSON) */}
           {activeTab === 'paste' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs text-zinc-400">
-                <span>Enter JSON array (e.g. <code className="text-cyan-400">[&#123; "name": "...", "traits": [...] &#125;]</code>) or standard metadata object:</span>
-                <button
-                  onClick={() => handleLoadSample('array')}
-                  className="text-cyan-400 hover:underline flex items-center gap-1"
-                >
-                  Insert Sample Array
-                </button>
+                <span>Enter raw CSV text or JSON metadata array:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleLoadSample('csv')}
+                    className="text-emerald-400 hover:underline flex items-center gap-1"
+                  >
+                    Insert CSV Sample
+                  </button>
+                  <span className="text-zinc-600">•</span>
+                  <button
+                    onClick={() => handleLoadSample('array')}
+                    className="text-cyan-400 hover:underline flex items-center gap-1"
+                  >
+                    Insert JSON Sample
+                  </button>
+                </div>
               </div>
 
               <textarea
                 rows={7}
-                value={jsonText}
-                onChange={(e) => setJsonText(e.target.value)}
-                placeholder={SAMPLE_METADATA_JSON}
-                className="w-full p-3.5 bg-zinc-950 border border-zinc-800 rounded-2xl text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/50 leading-relaxed"
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="name,description,image,price,royalty,Trait: Element\nCyber Samurai #001,Master of neon blades,https://...,0.08,7.5,Plasma"
+                className="w-full p-3.5 bg-zinc-950 border border-zinc-800 rounded-2xl text-xs font-mono text-zinc-200 focus:outline-none focus:border-emerald-500/50 leading-relaxed"
               />
 
               <div className="flex justify-end">
                 <button
                   onClick={handleParseText}
-                  disabled={!jsonText.trim()}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-cyan-500/20 transition-all"
+                  disabled={!inputText.trim()}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   Parse & Extract Metadata
@@ -399,42 +548,46 @@ export const BulkMetadataUploadModal: React.FC<{
             </div>
           )}
 
-          {/* Tab 2: Upload JSON File */}
-          {activeTab === 'upload' && (
-            <div className="space-y-3">
-              <div 
-                onClick={() => fileInputRef.current?.click()}
-                className="p-8 border-2 border-dashed border-zinc-700 hover:border-cyan-500/50 bg-zinc-950/60 hover:bg-zinc-950 rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all text-center"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center">
-                  <UploadCloud className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-zinc-200">Click to browse or drop JSON file here</div>
-                  <div className="text-xs text-zinc-500 mt-0.5">Supports .json, .txt containing standard NFT metadata</div>
-                </div>
-              </div>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                accept=".json,.txt"
-                className="hidden"
-              />
-            </div>
-          )}
-
           {/* Tab 3: Sample Templates */}
           {activeTab === 'samples' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                    CSV Batch Template
+                  </span>
+                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                    CSV Format
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400">
+                  Spreadsheet format with column headers for Name, Description, Image, Price, Royalty, and dynamic traits.
+                </p>
+                <div className="space-y-1.5 pt-1">
+                  <button
+                    onClick={() => handleLoadSample('csv')}
+                    className="w-full py-1.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-colors"
+                  >
+                    Load Sample CSV
+                  </button>
+                  <button
+                    onClick={() => downloadCSVTemplate()}
+                    className="w-full py-1.5 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Download .csv File
+                  </button>
+                </div>
+              </div>
+
               <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
                     <Layers className="w-4 h-4 text-cyan-400" />
-                    Multi-Asset Array (3 Items)
+                    Multi-Asset JSON Array
                   </span>
                   <span className="text-[10px] text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
-                    Batch Array
+                    JSON Array
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400">
@@ -452,7 +605,7 @@ export const BulkMetadataUploadModal: React.FC<{
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
                     <FileCode className="w-4 h-4 text-purple-400" />
-                    OpenSea / EIP-721 Single Object
+                    OpenSea / EIP-721
                   </span>
                   <span className="text-[10px] text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
                     Single Object
@@ -465,7 +618,7 @@ export const BulkMetadataUploadModal: React.FC<{
                   onClick={() => handleLoadSample('opensea')}
                   className="w-full py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-colors"
                 >
-                  Load Single Metadata Sample
+                  Load Single Sample
                 </button>
               </div>
             </div>
@@ -494,13 +647,13 @@ export const BulkMetadataUploadModal: React.FC<{
               {parsedItems.length > 1 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-zinc-300">Select Asset to Auto-Fill into Form:</span>
+                    <span className="font-bold text-zinc-300">Select Asset to Auto-Fill into Form or Send Entire Batch to Bulk Studio:</span>
                     <span className="text-zinc-500 font-mono">
                       Asset {selectedIndex + 1} of {parsedItems.length}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1">
                     {parsedItems.map((item, idx) => {
                       const isSelected = selectedIndex === idx;
                       return (
@@ -509,7 +662,7 @@ export const BulkMetadataUploadModal: React.FC<{
                           onClick={() => setSelectedIndex(idx)}
                           className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between gap-2 ${
                             isSelected
-                              ? 'bg-zinc-800 border-cyan-500/60 shadow-md shadow-cyan-500/10'
+                              ? 'bg-zinc-800 border-emerald-500/60 shadow-md shadow-emerald-500/10'
                               : 'bg-zinc-950/60 border-zinc-800 hover:border-zinc-700'
                           }`}
                         >
@@ -531,7 +684,7 @@ export const BulkMetadataUploadModal: React.FC<{
 
                           <div className="flex items-center justify-between pt-1 border-t border-zinc-800/80 text-[10px]">
                             <span className="text-zinc-500">Royalty: {item.royaltyPercentage ?? 7.5}%</span>
-                            <span className={`font-bold ${isSelected ? 'text-cyan-400' : 'text-zinc-400'}`}>
+                            <span className={`font-bold ${isSelected ? 'text-emerald-400' : 'text-zinc-400'}`}>
                               {isSelected ? '✓ Selected' : 'Click to Pick'}
                             </span>
                           </div>
@@ -547,9 +700,9 @@ export const BulkMetadataUploadModal: React.FC<{
                 <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800/90 space-y-3">
                   <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
                     <div className="flex items-center gap-2">
-                      <Eye className="w-4 h-4 text-cyan-400" />
+                      <Eye className="w-4 h-4 text-emerald-400" />
                       <span className="text-xs font-bold text-zinc-200">
-                        Parsed Fields Preview: <strong className="text-cyan-400 font-sans">{selectedAsset.name}</strong>
+                        Parsed Fields Preview: <strong className="text-emerald-400 font-sans">{selectedAsset.name}</strong>
                       </span>
                     </div>
                     {selectedAsset.royaltyPercentage !== undefined && (
@@ -563,7 +716,7 @@ export const BulkMetadataUploadModal: React.FC<{
                     <div className="sm:col-span-2 space-y-1">
                       <span className="text-zinc-500">Description:</span>
                       <p className="text-zinc-300 text-xs bg-zinc-900/80 p-2.5 rounded-xl border border-zinc-800/60 leading-relaxed">
-                        {selectedAsset.description || 'No description specified in JSON.'}
+                        {selectedAsset.description || 'No description specified in file.'}
                       </p>
                     </div>
 
@@ -596,7 +749,7 @@ export const BulkMetadataUploadModal: React.FC<{
                         {selectedAsset.traits.map((t, idx) => (
                           <div key={idx} className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-[11px] flex items-center gap-1.5">
                             <span className="text-zinc-500">{t.trait_type}:</span>
-                            <span className="text-cyan-300 font-mono font-semibold">{t.value}</span>
+                            <span className="text-emerald-300 font-mono font-semibold">{t.value}</span>
                           </div>
                         ))}
                       </div>
@@ -615,11 +768,11 @@ export const BulkMetadataUploadModal: React.FC<{
         <div className="p-4 border-t border-zinc-800 bg-zinc-950/90 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-xs text-zinc-500">
             {parsedItems.length > 1 ? (
-              <span>You have <strong>{parsedItems.length}</strong> items in this JSON file.</span>
+              <span>Loaded <strong>{parsedItems.length}</strong> items from metadata file.</span>
             ) : parsedItems.length === 1 ? (
               <span>1 asset ready to fill into form.</span>
             ) : (
-              <span>Paste or upload JSON to auto-fill form inputs.</span>
+              <span>Upload CSV/Excel or JSON to define multiple NFT fields at once.</span>
             )}
           </div>
 
@@ -634,10 +787,10 @@ export const BulkMetadataUploadModal: React.FC<{
             {parsedItems.length > 1 && onSendToBulkStudio && (
               <button
                 onClick={handleSendAllToBulkStudio}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-purple-600/30"
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-600/30"
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>Open All {parsedItems.length} in Bulk Studio</span>
+                <span>Generate Batch Transactions ({parsedItems.length} NFTs)</span>
               </button>
             )}
 
@@ -661,3 +814,4 @@ export const BulkMetadataUploadModal: React.FC<{
     </div>
   );
 };
+
