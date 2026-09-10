@@ -11,6 +11,7 @@ import { NFTBridge } from './components/NFTBridge';
 import { NFTDetailModal } from './components/NFTDetailModal';
 import { WalletModal } from './components/WalletModal';
 import { FaucetModal } from './components/FaucetModal';
+import ExternalLinks from './components/ExternalLinks';
 import { NFT } from './types';
 import { Sparkles, Layers, ShieldCheck, Fuel, Droplet, PlusCircle, ArrowLeftRight } from 'lucide-react';
 
@@ -88,6 +89,9 @@ function AppContent() {
         )}
 
       </main>
+
+      {/* External Links: Website, Socials, Blog, Newsletter */}
+      <ExternalLinks />
 
       {/* Footer */}
       <footer className="border-t border-zinc-900 bg-zinc-950/80 py-8 px-4 sm:px-6 lg:px-8 mt-auto">
