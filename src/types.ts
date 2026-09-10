@@ -71,6 +71,8 @@ export interface NFTTrait {
   display_type?: 'string' | 'number' | 'boost_percentage' | 'boost_number' | 'date';
   max_value?: number;
   rarityPercentage?: number;
+  rarityTier?: 'Mythic' | 'Legendary' | 'Epic' | 'Rare' | 'Uncommon' | 'Common' | string;
+  description?: string;
 }
 
 export interface NFT {

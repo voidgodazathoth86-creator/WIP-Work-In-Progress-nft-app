@@ -180,7 +180,7 @@ export const AIMetadataCopilot: React.FC<AIMetadataCopilotProps> = ({
               </span>
               <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
                 <Cpu className="w-2.5 h-2.5" />
-                Gemini 3.7 Flash
+                Gemini 3.8 Flash Vision
               </span>
             </div>
             <p className="text-[11px] text-zinc-400">
@@ -510,9 +510,22 @@ export const AIMetadataCopilot: React.FC<AIMetadataCopilotProps> = ({
                           {trait.value}
                         </div>
 
+                        {trait.description && (
+                          <p className="text-[10px] text-zinc-400 mt-1 line-clamp-2 italic leading-tight">
+                            {trait.description}
+                          </p>
+                        )}
+
                         {trait.rarityPercentage && (
-                          <div className="mt-1 flex items-center justify-between text-[10px] text-zinc-500">
-                            <span>Rarity</span>
+                          <div className="mt-1.5 flex items-center justify-between text-[10px] text-zinc-500">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              trait.rarityPercentage <= 3 ? 'bg-purple-500/20 text-purple-300' :
+                              trait.rarityPercentage <= 8 ? 'bg-amber-500/20 text-amber-300' :
+                              trait.rarityPercentage <= 18 ? 'bg-cyan-500/20 text-cyan-300' :
+                              trait.rarityPercentage <= 30 ? 'bg-blue-500/20 text-blue-300' : 'bg-zinc-800 text-zinc-400'
+                            }`}>
+                              {trait.rarityTier || (trait.rarityPercentage <= 3 ? 'Mythic' : trait.rarityPercentage <= 8 ? 'Legendary' : trait.rarityPercentage <= 18 ? 'Epic' : trait.rarityPercentage <= 30 ? 'Rare' : 'Common')}
+                            </span>
                             <span className="font-mono text-emerald-400 font-semibold">
                               {trait.rarityPercentage}% weight
                             </span>
