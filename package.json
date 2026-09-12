@@ -23,13 +23,17 @@
     "@types/node": "^20.11.0",
     "@types/pg": "^8.11.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.5.3",
     "vite": "^5.4.0"
   },
   "scripts": {
-    "build": "vite build",
+    "dev": "tsx server.ts",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
+    "lint": "tsc --noEmit",
     "db:migrate": "psql $DATABASE_URL -f schema.sql",
-    "dev": "vite",
     "preview": "vite preview",
     "server": "bun run server.ts"
   }
