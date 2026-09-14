@@ -1,4 +1,4 @@
-// server.ts - PRODUCTION FINAL - EXPRESS + VITE + SUPABASE + FIRESTORE + gemini-1.5-flash - WHOLE - NO TRIMMING
+// server.ts - PRODUCTION FINAL - EXPRESS + VITE + SUPABASE + FIRESTORE + GEMINI 3.8 FLASH - WHOLE - NO TRIMMING
 // Fee Collector LIVE: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 // Fee Wallet (YOU GET PAID): 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0
 // Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6 WIPLOGO
@@ -1015,7 +1015,7 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3.8-flash',
         contents: parts,
         config: {
           temperature: 0.5,
@@ -1088,7 +1088,7 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3.8-flash',
         contents: `Create branding, lore, and token symbol for an NFT collection with theme: "${theme}". Total Supply: ${count}, Standard: ${standard}.`,
         config: {
           responseMimeType: 'application/json',
@@ -1134,7 +1134,7 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
     console.log(`Fee Collector: ${FEE_COLLECTOR_ADDRESS} (Block 93415806) | Fee Wallet: ${FEE_WALLET} YOU GET PAID`);
     console.log(`Collections: WIP (${WIP_COLLECTION}) & WIPLOGO (${LOGO_COLLECTION}) - Independent Single 1/1 Edition`);
     console.log(`Supabase Org: Work-in-Progress-NFTs Project: WIP-nfts America us-east-1 Pooler: aws-0-us-east-1.pooler.supabase.com:6543 - SSL: rejectUnauthorized false`);
-    console.log(`Firestore DB: ${firebaseConfig.firestoreDatabaseId} - gemini-1.5-flash - API: /api/health, /api/ai/*, /api/site-links, /api/app-access (public)`);
+    console.log(`Firestore DB: ${firebaseConfig.firestoreDatabaseId} - Gemini: gemini-3.8-flash - API: /api/health, /api/ai/*, /api/site-links, /api/app-access (public)`);
   });
 }
 
