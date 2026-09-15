@@ -27,7 +27,41 @@ import { firebaseConfig } from './firebase-config';
 import { SITE_LINKS } from './deployed-config';
 
 dotenv.config();
+// --- 100% PROD ENV CHECK - VERCEL ONLY ---
+const DATABASE_URL = process.env.DATABASE_URL;
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 
+if (!DATABASE_URL) {
+  console.error("❌ MISSING DATABASE_URL - Must be postgresql://...:6543 with pgbouncer=true");
+  // Don't crash in prod, but log it
+}
+if (!GEMINI_API_KEY || !GEMINI_API_KEY.startsWith("AIzaSy")) {
+  console.error("❌ GEMINI_API_KEY invalid — Must be AIzaSy... from aistudio.google.com/app/apikey, NOT eyJ... dots");
+}
+if (!FIREBASE_API_KEY || !FIREBASE_API_KEY.startsWith("AIzaSy")) {
+  console.error("❌ FIREBASE_API_KEY invalid — Must be AIzaSyC... from console.firebase.google.com > Project Settings > Config, NOT eyJ...");
+}
+
+// --- SUPABASE POOLER (MUST BE 6543) ---
+export const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+// --- GEMINI 3.8 FLASH ---
+export const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
+
+// --- FIRESTORE - Your firebase-config.ts already has public config, this is fine ---
+// firebaseConfig.ts should be:
+// export const firebaseConfig = {
+//   apiKey: process.env.FIREBASE_API_KEY || "AIzaSyC...fallback",
+//   authDomain: "gen-lang-client-0392782201.firebaseapp.com",
+//   projectId: "gen-lang-client-0392782201",
+//   ...
+// }
+const fbApp = initializeApp(firebaseConfig);
+export const db = getFirestore(fbApp);
 // === LIVE DEPLOYED - HARDCODED ===
 export const FEE_COLLECTOR_ADDRESS = "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E";
 export const FEE_COLLECTOR_CHAIN = "polygon";
