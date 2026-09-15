@@ -96,21 +96,7 @@ if (process.env.DATABASE_URL) {
   }
 }
 
-// --- Firebase Firestore Config ---
-let firebaseApp: any = null;
-let db: any = null;
-try {
-  firebaseApp = initializeApp({
-    apiKey: firebaseConfig.apiKey,
-    authDomain: firebaseConfig.authDomain,
-    projectId: firebaseConfig.projectId,
-    storageBucket: firebaseConfig.storageBucket,
-    messagingSenderId: firebaseConfig.messagingSenderId,
-    appId: firebaseConfig.appId,
-  });
 
-} catch (err) {
-  console.warn('Firebase initialization notice:', err);
 }
 
 // Fee resolution helper
