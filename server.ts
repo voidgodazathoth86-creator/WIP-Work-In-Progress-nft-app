@@ -36,9 +36,7 @@ if (!DATABASE_URL) {
   console.error("❌ MISSING DATABASE_URL - Must be postgresql://...:6543 with pgbouncer=true");
   // Don't crash in prod, but log it
 }
-if (!GEMINI_API_KEY || !GEMINI_API_KEY.startsWith("AIzaSy")) {
-  console.error("❌ GEMINI_API_KEY invalid — Must be AIzaSy... from aistudio.google.com/app/apikey, NOT eyJ... dots");
-}
+
 if (!FIREBASE_API_KEY || !FIREBASE_API_KEY.startsWith("AIzaSy")) {
   console.error("❌ FIREBASE_API_KEY invalid — Must be AIzaSyC... from console.firebase.google.com > Project Settings > Config, NOT eyJ...");
 }
