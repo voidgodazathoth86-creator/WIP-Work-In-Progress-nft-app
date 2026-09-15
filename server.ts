@@ -108,7 +108,7 @@ try {
     messagingSenderId: firebaseConfig.messagingSenderId,
     appId: firebaseConfig.appId,
   });
-  db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+
 } catch (err) {
   console.warn('Firebase initialization notice:', err);
 }
