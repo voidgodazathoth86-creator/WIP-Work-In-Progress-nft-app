@@ -2,7 +2,7 @@
 // Fee Collector LIVE: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 // Fee Wallet (YOU GET PAID): 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0
 // Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6 WIPLOGO
-// SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543 | GitHub linked | No card needed
+// SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543
 
 import express, { Request, Response } from 'express';
 import path from 'path';
@@ -27,6 +27,7 @@ import { firebaseConfig } from './firebase-config';
 import { SITE_LINKS } from './deployed-config';
 
 dotenv.config();
+
 // --- 100% PROD ENV CHECK - VERCEL ONLY ---
 const DATABASE_URL = process.env.DATABASE_URL;
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
@@ -34,32 +35,26 @@ const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 
 if (!DATABASE_URL) {
   console.error("❌ MISSING DATABASE_URL - Must be postgresql://...:6543 with pgbouncer=true");
-  // Don't crash in prod, but log it
 }
 
 if (!FIREBASE_API_KEY || !FIREBASE_API_KEY.startsWith("AIzaSy")) {
-  console.error("❌ FIREBASE_API_KEY invalid — Must be AIzaSyC... from console.firebase.google.com > Project Settings > Config, NOT eyJ...");
+  console.error("❌ FIREBASE_API_KEY invalid — Must be AIzaSyC... from console.firebase.google.com > Project Settings > Config");
 }
 
-// --- SUPABASE POOLER (MUST BE 6543) ---
+// --- SUPABASE POOLER (MUST BE 6543) - SINGLE DECLARATION ONLY ---
 export const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  max: 20,
 });
 
 // --- GEMINI 3.8 FLASH ---
 export const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
-// --- FIRESTORE - Your firebase-config.ts already has public config, this is fine ---
-// firebaseConfig.ts should be:
-// export const firebaseConfig = {
-//   apiKey: process.env.FIREBASE_API_KEY || "AIzaSyC...fallback",
-//   authDomain: "gen-lang-client-0392782201.firebaseapp.com",
-//   projectId: "gen-lang-client-0392782201",
-//   ...
-// }
+// --- FIRESTORE ---
 const fbApp = initializeApp(firebaseConfig);
 export const db = getFirestore(fbApp);
+
 // === LIVE DEPLOYED - HARDCODED ===
 export const FEE_COLLECTOR_ADDRESS = "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E";
 export const FEE_COLLECTOR_CHAIN = "polygon";
@@ -79,24 +74,6 @@ export const OWNER_WALLETS = [
 export function isOwner(wallet: string): boolean {
   if (!wallet) return false;
   return OWNER_WALLETS.includes(wallet.toLowerCase());
-}
-
-// --- SUPABASE Config - Org: Work-in-Progress-NFTs Project: WIP-nfts America us-east-1 ---
-// Pooler requires SSL - DATABASE_URL format: postgresql://postgres.[ref]:[pass]@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true
-let pool: Pool | null = null;
-if (process.env.DATABASE_URL) {
-  try {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }, // Supabase us-east-1 pooler requires SSL - Org: Work-in-Progress-NFTs Project: WIP-nfts America
-      max: 20,
-    });
-  } catch (err) {
-    console.warn('Supabase Pool initialization notice (Org: Work-in-Progress-NFTs Project: WIP-nfts):', err);
-  }
-}
-
-
 }
 
 // Fee resolution helper
@@ -177,7 +154,7 @@ async function startServer() {
         { address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', hasNFTs: true, label: 'Independent Single 1/1 Edition (Direct Smart Contract)' }
       ],
       supabase: sqlOk ? `connected (America us-east-1) - Org: Work-in-Progress-NFTs Project: WIP-nfts - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting - check DATABASE_URL pooler 6543' : 'not connected - set DATABASE_URL - Supabase Org Work-in-Progress-NFTs Project WIP-nfts'),
-      cloud_sql: sqlOk ? `connected (us-east1) - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting' : 'not connected - set DATABASE_URL'), // legacy alias for compatibility
+      cloud_sql: sqlOk ? `connected (us-east1) - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting' : 'not connected - set DATABASE_URL'),
       database_provider: 'supabase',
       database_org: 'Work-in-Progress-NFTs',
       database_project: 'WIP-nfts',
@@ -796,7 +773,7 @@ async function startServer() {
     res.json({ success: true, localOnly: true });
   });
 
-  // === TRANSACTIONS LOG - RESTORED WHOLE ===
+  // === TRANSACTIONS LOG ===
   app.get('/api/transactions/:wallet', async (req: Request, res: Response) => {
     const wallet = req.params.wallet;
     if (pool) {
@@ -808,7 +785,7 @@ async function startServer() {
     res.json([]);
   });
 
-  // === SITE LINKS - Website, Socials, Blog, Newsletter ===
+  // === SITE LINKS ===
   app.get('/api/site-links', async (req: Request, res: Response) => {
     if (pool) {
       try {
