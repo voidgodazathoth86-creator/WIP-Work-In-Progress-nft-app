@@ -1,49 +1,50 @@
-// WIP NFT App - FINAL DEPLOYED CONFIG - COMPLETE - BOTH COLLECTIONS LIVE
-export const DEPLOYED_FEE_COLLECTOR = {
-  address: "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E",
-  chain: "polygon",
-  block: 93415806,
-  txHash: "0x5a2...b45b1",
+// deployed-config.ts - FINAL - BOTH COLLECTIONS MINTABLE + BOTH FACTORIES
+
+export const SITE_LINKS = {
+  feeCollector: "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E",
   feeWallet: "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0",
   royaltyWallet: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762",
-  usdc: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352",
-};
-export const OWNER_WALLETS = [
-  "0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0",
-  "0xbab06d358b181eb16e3189525bcc0bc4761a3762",
-];
-export const DEPLOYED_COLLECTIONS = [
-  { name: "Work-In-Progress-NFTs", symbol: "WIP", address: "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9", chain: "polygon", source: "thirdweb", hasNFTs: true, description: "Main WIP collection" },
-  { name: "WIP Logo Collection", symbol: "WIPLOGO", address: "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6", chain: "polygon", source: "wipfactory", hasNFTs: true, description: "WIP Logo Collection - LIVE" }
-];
-export const WIP_COLLECTION_ADDRESS = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
-export const LOGO_COLLECTION_ADDRESS = "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6";
+  usdcPolygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352",
+  chain: "polygon"
+}
 
-// === NEW: EXTERNAL LINKS - Website, Socials, Blog & Newsletter ===
-// These are placeholders - update when you build them, app will auto-show
-export const SITE_LINKS = {
-  website: {
-    url: "", // e.g. "https://workinprogress.art" - leave empty for "Coming Soon"
-    label: "Website",
-    enabled: false, // set true when website is live
+// COLLECTIONS - 1 contract = many NFTs (mintable)
+export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9"; // WIP - 421/1000
+export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46"; // Logo - NEW - named Logo
+
+// OLD - keep for reference
+export const OLD_LOGO_COLLECTION = "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6";
+
+// FACTORIES - KEEP BOTH
+export const FACTORIES = {
+  SINGLE_1_1: "0xOLD_SINGLE_FACTORY_KEEP", // your existing factory that creates 0x885b... like 4906 - KEEP - replace with real address
+  COLLECTION: "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37" // NEW factory that creates collection contracts
+}
+
+// MARKETPLACE - shows both
+export const COLLECTIONS_LIST = [
+  {
+    id: "1a4eda70-3517-4bf4-acc7-6fb612fcbec7",
+    address: WIP_COLLECTION,
+    name: "Work-In-Progress-NFTs",
+    symbol: "WIP",
+    type: "collection",
+    canMintTo: true,
+    supply: "421/1000"
   },
-  socials: {
-    twitter: { url: "", label: "X / Twitter", enabled: false },
-    instagram: { url: "", label: "Instagram", enabled: false },
-    discord: { url: "", label: "Discord", enabled: false },
-    tiktok: { url: "", label: "TikTok", enabled: false },
-    youtube: { url: "", label: "YouTube", enabled: false },
-    // add more as needed
-  },
-  blog: {
-    url: "", // e.g. "https://blog.workinprogress.art" or Medium/Hashnode
-    label: "Blog",
-    enabled: false,
-  },
-  newsletter: {
-    url: "", // e.g. "https://newsletter.workinprogress.art" or Substack/Beehiiv
-    label: "Newsletter",
-    enabled: false,
-    embedEnabled: false, // set true to show email capture in footer
-  },
-};
+  {
+    id: "logo-new",
+    address: LOGO_COLLECTION,
+    name: "Logo",
+    symbol: "LOGO",
+    type: "collection",
+    canMintTo: true,
+    supply: "0/1000"
+  }
+]
+
+// FOR SUPABASE QUERY
+export const MARKETPLACE_CONTRACTS = [
+  WIP_COLLECTION,
+  LOGO_COLLECTION
+]
