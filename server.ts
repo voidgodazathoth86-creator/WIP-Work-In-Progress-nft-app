@@ -1,7 +1,7 @@
 // server.ts - PRODUCTION FINAL - EXPRESS + VITE + SUPABASE + FIRESTORE + GEMINI 3.8 FLASH - WHOLE - NO TRIMMING
 // Fee Collector LIVE: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 // Fee Wallet (YOU GET PAID): 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0
-// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6 WIPLOGO
+// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0x675fD85FbcB13CE8080DBba780424A9e571B7f46 WIPLOGO
 // SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543
 
 import express, { Request, Response } from 'express';
@@ -55,14 +55,32 @@ export const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 const fbApp = initializeApp(firebaseConfig);
 export const db = getFirestore(fbApp);
 
-// === LIVE DEPLOYED - HARDCODED ===
+// === LIVE DEPLOYED - HARDCODED + DUAL FACTORIES ===
 export const FEE_COLLECTOR_ADDRESS = "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E";
 export const FEE_COLLECTOR_CHAIN = "polygon";
 export const FEE_WALLET = "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0";
 export const ROYALTY_WALLET = "0xBaB06d358B181eB16e3189525BCc0bc4761a3762";
 export const USDC_POLYGON = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352";
-export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
-export const LOGO_COLLECTION = "0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6";
+
+// EXISTING COLLECTIONS YOU CAN MINT TO (1 contract = many NFTs)
+export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9"; // 421/1000
+export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46"; // Logo - 1 contract many NFTs
+
+// FACTORIES - KEEP BOTH
+export const FACTORIES = {
+  SINGLE_1_1: "0xOLD_SINGLE_FACTORY_KEEP", // your current factory that creates 0x885b... type like 4906 - KEEP
+  COLLECTION: "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37" // NEW factory that creates 1 contract for many NFTs like WIP
+};
+
+export const COLLECTION_REGISTRY = [
+  { address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', type: 'collection', canMintTo: true, supply: '421/1000' },
+  { address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', type: 'collection', canMintTo: true, supply: '0/1000' }
+];
+
+export const FACTORY_REGISTRY = [
+  { address: FACTORIES.SINGLE_1_1, name: 'Single 1/1 Factory (KEEP)', type: 'factory_single', canCreate: true, desc: 'Creates new contract per NFT - like 0x885b078d... 4906' },
+  { address: FACTORIES.COLLECTION, name: 'Collection Factory (NEW)', type: 'factory_collection', canCreate: true, desc: 'Creates 1 contract for many NFTs - like WIP 0xc2eaa...' }
+];
 
 export const OWNER_WALLETS = [
   "0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0",
