@@ -2,7 +2,7 @@
 // Fee Collector LIVE: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 // Fee Wallet (YOU GET PAID): 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0
 // Royalty Wallet: 0xBaB06d358B181eB16e3189525BCc0bc4761a3762
-// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP (421/1000) + 0x675fD85FbcB13CE8080DBba780424A9e571B7f46 Logo NEW - standalone, NOT factory-made
+// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP (7 total = 5 old + 2 via app) + 0x675fD85FbcB13CE8080DBba780424A9e571B7f46 Logo NEW - standalone, NOT factory-made
 // Collection Factory (NEW): 0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37 - 1 contract = 1000 NFTs
 // SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543 | GitHub linked | No card needed
 
@@ -294,25 +294,36 @@ async function startServer() {
     });
   });
 
-  // === AUTO-SYNC WIP & LOGO TOKENS ===
+  // === AUTO-SYNC WIP & LOGO TOKENS - FINAL - UUID FIX - NO PLACEHOLDERS ===
   app.get('/api/wip/tokens', async (req: Request, res: Response) => {
     let dbTokens: any[] = [];
     if (pool) {
       try {
         const { rows } = await pool.query(`
-          SELECT t.*, c.contract_address, c.name as collection_name
+          SELECT t.*, c.contract_address, c.name as collection_name, c.chain
           FROM tokens t
-          LEFT JOIN collections c ON t.collection_id = c.id
-          WHERE c.contract_address IN ($1, $2)
-             OR t.collection_id IN ('col-wip-polygon', 'col-wip-logo-polygon', $1, $2)
-          ORDER BY t.created_at DESC
+          JOIN collections c ON t.collection_id = c.id
+          WHERE LOWER(c.contract_address) = LOWER($1)
+             OR LOWER(c.contract_address) = LOWER($2)
+             OR c.id = '1a4eda70-3517-4bf4-acc7-6fb612fcbec7'::uuid
+          ORDER BY t.token_id::int ASC
         `, [WIP_COLLECTION, LOGO_COLLECTION]);
         if (rows) dbTokens = rows;
-      } catch {}
+      } catch (e) {
+        console.warn('WIP tokens query:', e);
+        // fallback without join
+        try {
+          const { rows } = await pool.query(`SELECT * FROM tokens ORDER BY token_id::int ASC LIMIT 100`);
+          dbTokens = rows || [];
+        } catch {}
+      }
     }
     res.json({
       success: true,
       syncedAt: Date.now(),
+      total: dbTokens.length + liveMintedTokens.length,
+      wip_collection: WIP_COLLECTION,
+      logo_collection: LOGO_COLLECTION,
       tokens: [...dbTokens, ...liveMintedTokens]
     });
   });
