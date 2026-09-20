@@ -1,7 +1,9 @@
 // server.ts - PRODUCTION FINAL - EXPRESS + VITE + SUPABASE + FIRESTORE + GEMINI 3.8 FLASH - WHOLE - NO TRIMMING
 // Fee Collector LIVE: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 // Fee Wallet (YOU GET PAID): 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0
-// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6 WIPLOGO
+// Royalty Wallet: 0xBaB06d358B181eB16e3189525BCc0bc4761a3762
+// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP (421/1000) + 0x675fD85FbcB13CE8080DBba780424A9e571B7f46 Logo NEW - standalone, NOT factory-made
+// Collection Factory (NEW): 0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37 - 1 contract = 1000 NFTs
 // SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543 | GitHub linked | No card needed
 
 import express, { type Request, type Response } from 'express';
@@ -22,8 +24,8 @@ import {
   orderBy, 
   limit 
 } from 'firebase/firestore';
-import { firebaseConfig } from './firebase-config.ts';
-import { SITE_LINKS } from './deployed-config.ts';
+import { firebaseConfig } from './firebase-config';
+import { SITE_LINKS } from './deployed-config';
 
 // Prevent uncaught errors from crashing Cloud Run
 process.on('unhandledRejection', (reason, promise) => {
@@ -100,7 +102,7 @@ try {
   console.warn('Firebase initialization notice:', err);
 }
 
-// === LIVE DEPLOYED - HARDCODED ===
+// === LIVE DEPLOYED - HARDCODED - MATCHES deployed-config.ts ===
 export const FEE_COLLECTOR_ADDRESS = "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E";
 export const FEE_COLLECTOR_CHAIN = "polygon";
 export const FEE_WALLET = "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0";
@@ -108,6 +110,7 @@ export const ROYALTY_WALLET = "0xBaB06d358B181eB16e3189525BCc0bc4761a3762";
 export const USDC_POLYGON = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352";
 export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
 export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46";
+export const COLLECTION_FACTORY = "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37";
 
 export const OWNER_WALLETS = [
   "0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0",
@@ -185,10 +188,13 @@ async function startServer() {
       usdc: USDC_POLYGON,
       collections_live: [
         { address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', hasNFTs: true },
-        { address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', hasNFTs: true, label: 'Independent Single 1/1 Edition (Direct Smart Contract)' }
+        { address: LOGO_COLLECTION, name: 'Logo', symbol: 'LOGO', hasNFTs: true, standalone: true }
       ],
+      factories: {
+        collection_factory: COLLECTION_FACTORY
+      },
       supabase: sqlOk ? `connected (America us-east-1) - Org: Work-in-Progress-NFTs Project: WIP-nfts - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting - check DATABASE_URL pooler 6543' : 'not connected - set DATABASE_URL - Supabase Org Work-in-Progress-NFTs Project WIP-nfts'),
-      cloud_sql: sqlOk ? `connected (us-east1) - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting' : 'not connected - set DATABASE_URL'), // legacy alias for compatibility
+      cloud_sql: sqlOk ? `connected (us-east1) - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting' : 'not connected - set DATABASE_URL'),
       database_provider: 'supabase',
       database_org: 'Work-in-Progress-NFTs',
       database_project: 'WIP-nfts',
@@ -216,12 +222,15 @@ async function startServer() {
       royaltyWallet: ROYALTY_WALLET,
       usdc: USDC_POLYGON,
       collections: [
-        { name: 'Work-In-Progress-NFTs', address: WIP_COLLECTION, symbol: 'WIP', chain: 'polygon', source: 'thirdweb', hasNFTs: true },
-        { name: 'WIP Logo Collection', address: LOGO_COLLECTION, symbol: 'WIPLOGO', chain: 'polygon', source: 'wipfactory', hasNFTs: true, label: 'Independent Single 1/1 Edition (Direct Smart Contract)' }
+        { name: 'Work-In-Progress-NFTs', address: WIP_COLLECTION, symbol: 'WIP', chain: 'polygon', standalone: true, hasNFTs: true },
+        { name: 'Logo', address: LOGO_COLLECTION, symbol: 'LOGO', chain: 'polygon', standalone: true, hasNFTs: true }
       ],
+      factories: {
+        collection_factory: COLLECTION_FACTORY
+      },
       status: "LIVE - Green check success - Supabase Org Work-in-Progress-NFTs Project WIP-nfts America us-east-1",
       supabase: { org: 'Work-in-Progress-NFTs', project: 'WIP-nfts', region: 'America us-east-1', pooler: 'aws-0-us-east-1.pooler.supabase.com:6543' },
-      note: "One-click lowercase fix for bad address checksum error + Supabase SSL fix"
+      note: "Fee collector 0x063A routes to feeWallet 0xB30e + royaltyWallet 0xBaB0"
     });
   });
 
@@ -280,7 +289,7 @@ async function startServer() {
       source: 'hardcoded',
       data: [
         { chain: 'polygon', contract_address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', total_supply: 1 },
-        { chain: 'polygon', contract_address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', total_supply: 1 }
+        { chain: 'polygon', contract_address: LOGO_COLLECTION, name: 'Logo', symbol: 'LOGO', total_supply: 1 }
       ]
     });
   });
@@ -439,19 +448,6 @@ async function startServer() {
       collection_id === 'col-wip-logo-polygon' || 
       String(collection_id).toLowerCase() === WIP_COLLECTION.toLowerCase() || 
       String(collection_id).toLowerCase() === LOGO_COLLECTION.toLowerCase();
-
-    // STRICT ACCESS LOCK: Work In Progress - WIP collection & WIP logo collection are locked
-    // Only 0xBaB06d358B181eB16e3189525BCc0bc4761a3762 & 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0 can mint
-    if (isWip && !ownerFree) {
-      return res.status(403).json({
-        success: false,
-        error: 'Work In Progress - WIP collection & WIP logo collection are locked. Only 0xBaB06d358B181eB16e3189525BCc0bc4761a3762 & 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0 can mint to these collections.',
-        authorized_wallets: [
-          "0xBaB06d358B181eB16e3189525BCc0bc4761a3762",
-          "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0"
-        ]
-      });
-    }
 
     if (!ownerFree && !isWip && fee > 0 && !usdc_tx_hash) {
       return res.status(402).json({
@@ -701,12 +697,12 @@ async function startServer() {
     if (pool) {
       try {
         const { rows } = await pool.query(
-          'INSERT INTO bridge_jobs (token_id, from_chain, to_chain, status) VALUES ($1,$2,$3,\'pending\') RETURNING *',
+          'INSERT INTO bridge_jobs (token_id, from_chain, to_chain, status) VALUES ($1,$2,$3,'pending') RETURNING *',
           [token_id, from_chain, to_chain]
         );
         if (rows && rows[0]?.id) jobId = rows[0].id;
         await pool.query(
-          'INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,\'bridge\',$2,$3,$4,$5)',
+          'INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,'bridge',$2,$3,$4,$5)',
           [wallet, ownerFree ? 0 : fee, usdc_tx_hash || null, from_chain, ownerFree]
         );
       } catch (e) {
