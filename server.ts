@@ -1246,4 +1246,3 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
 }
 
 startServer();
-
