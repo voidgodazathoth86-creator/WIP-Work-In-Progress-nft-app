@@ -1,3 +1,4 @@
+
 // deployed-config.ts - FINAL - WIP & Logo standalone + both factories + fee collector
 // Fee goes to collector 0x063A then routed to feeWallet 0xB30e + royaltyWallet 0xBaB0
 
@@ -77,4 +78,3 @@ export const MARKETPLACE_CONTRACTS = [
   WIP_COLLECTION,
   LOGO_COLLECTION
 ]
-
