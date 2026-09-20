@@ -1,14 +1,13 @@
 // server.ts - PRODUCTION FINAL - EXPRESS + VITE + SUPABASE + FIRESTORE + GEMINI 3.8 FLASH - WHOLE - NO TRIMMING
 // Fee Collector LIVE: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 // Fee Wallet (YOU GET PAID): 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0
-// Royalty Wallet: 0xBaB06d358B181eB16e3189525BCc0bc4761a3762
-// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP (7 total = 5 old + 2 via app) + 0x675fD85FbcB13CE8080DBba780424A9e571B7f46 Logo NEW - standalone, NOT factory-made
-// Collection Factory (NEW): 0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37 - 1 contract = 1000 NFTs
-// SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543 | GitHub linked | No card needed
+// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0x675fD85FbcB13CE8080DBba780424A9e571B7f46 WIPLOGO
+// SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543
 
-import express, { type Request, type Response } from 'express';
+import express, { Request, Response } from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
+import { createServer as createViteServer } from 'vite';
 import { Pool } from 'pg';
 import { GoogleGenAI, Type } from '@google/genai';
 import { initializeApp } from 'firebase/app';
@@ -27,90 +26,61 @@ import {
 import { firebaseConfig } from './firebase-config';
 import { SITE_LINKS } from './deployed-config';
 
-// Prevent uncaught errors from crashing Cloud Run
-process.on('unhandledRejection', (reason, promise) => {
-  console.warn('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
-
 dotenv.config();
-// --- PROD ENV CHECK & INITIALIZATION ---
+
+// --- 100% PROD ENV CHECK - VERCEL ONLY ---
 const DATABASE_URL = process.env.DATABASE_URL;
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 
 if (!DATABASE_URL) {
-  console.warn("Notice: DATABASE_URL not set. Supabase features will connect once DATABASE_URL is provided.");
+  console.error("❌ MISSING DATABASE_URL - Must be postgresql://...:6543 with pgbouncer=true");
 }
 
-// --- SUPABASE POOLER (PORT 6543) ---
-// Pooler requires SSL - Org: Work-in-Progress-NFTs Project: WIP-nfts America us-east-1
-export let pool: Pool | null = null;
-if (DATABASE_URL) {
-  try {
-    pool = new Pool({
-      connectionString: DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 20,
-    });
-    pool.on('error', (err) => {
-      console.warn('Supabase Pool client background error:', err);
-    });
-  } catch (err) {
-    console.warn('Supabase Pool initialization notice (Org: Work-in-Progress-NFTs Project: WIP-nfts):', err);
-  }
+if (!FIREBASE_API_KEY || !FIREBASE_API_KEY.startsWith("AIzaSy")) {
+  console.error("❌ FIREBASE_API_KEY invalid — Must be AIzaSyC... from console.firebase.google.com > Project Settings > Config");
 }
 
-// Safe Gemini AI Initializer - uses secret injected at runtime
-export function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
-  if (!apiKey) return null;
-  try {
-    return new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-  } catch (err) {
-    console.warn('Gemini client initialization error:', err);
-    return null;
-  }
-}
+// --- SUPABASE POOLER (MUST BE 6543) - SINGLE DECLARATION ONLY ---
+export const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 20,
+});
 
 // --- GEMINI 3.8 FLASH ---
-export const ai = getGeminiClient();
+export const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY! });
 
 // --- FIRESTORE ---
-let firebaseApp: any = null;
-export let db: any = null;
-try {
-  firebaseApp = initializeApp({
-    apiKey: FIREBASE_API_KEY || firebaseConfig.apiKey,
-    authDomain: firebaseConfig.authDomain,
-    projectId: firebaseConfig.projectId,
-    storageBucket: firebaseConfig.storageBucket,
-    messagingSenderId: firebaseConfig.messagingSenderId,
-    appId: firebaseConfig.appId,
-  });
-  db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-} catch (err) {
-  console.warn('Firebase initialization notice:', err);
-}
+const fbApp = initializeApp(firebaseConfig);
+export const db = getFirestore(fbApp);
 
-// === LIVE DEPLOYED - HARDCODED - MATCHES deployed-config.ts ===
+// === LIVE DEPLOYED - HARDCODED + DUAL FACTORIES ===
 export const FEE_COLLECTOR_ADDRESS = "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E";
 export const FEE_COLLECTOR_CHAIN = "polygon";
 export const FEE_WALLET = "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0";
 export const ROYALTY_WALLET = "0xBaB06d358B181eB16e3189525BCc0bc4761a3762";
 export const USDC_POLYGON = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352";
-export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
-export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46";
-export const COLLECTION_FACTORY = "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37";
+
+// EXISTING COLLECTIONS YOU CAN MINT TO (1 contract = many NFTs)
+export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9"; // 421/1000
+export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46"; // Logo - 1 contract many NFTs
+
+// FACTORIES - KEEP BOTH
+export const FACTORIES = {
+  SINGLE_1_1: "0xOLD_SINGLE_FACTORY_KEEP", // your current factory that creates 0x885b... type like 4906 - KEEP
+  COLLECTION: "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37" // NEW factory that creates 1 contract for many NFTs like WIP
+};
+
+export const COLLECTION_REGISTRY = [
+  { address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', type: 'collection', canMintTo: true, supply: '421/1000' },
+  { address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', type: 'collection', canMintTo: true, supply: '0/1000' }
+];
+
+export const FACTORY_REGISTRY = [
+  { address: FACTORIES.SINGLE_1_1, name: 'Single 1/1 Factory (KEEP)', type: 'factory_single', canCreate: true, desc: 'Creates new contract per NFT - like 0x885b078d... 4906' },
+  { address: FACTORIES.COLLECTION, name: 'Collection Factory (NEW)', type: 'factory_collection', canCreate: true, desc: 'Creates 1 contract for many NFTs - like WIP 0xc2eaa...' }
+];
 
 export const OWNER_WALLETS = [
   "0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0",
@@ -123,9 +93,6 @@ export function isOwner(wallet: string): boolean {
   if (!wallet) return false;
   return OWNER_WALLETS.includes(wallet.toLowerCase());
 }
-
-// In-memory cache for live minted tokens across sessions
-const liveMintedTokens: any[] = [];
 
 // Fee resolution helper
 async function getFee(action: string): Promise<number> {
@@ -147,9 +114,23 @@ async function getFee(action: string): Promise<number> {
   return defaults[action] ?? 0.5;
 }
 
+// Safe Gemini AI Initializer - uses secret injected at runtime
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!apiKey) return null;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Middleware
   app.use(express.json({ limit: '50mb' }));
@@ -188,11 +169,8 @@ async function startServer() {
       usdc: USDC_POLYGON,
       collections_live: [
         { address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', hasNFTs: true },
-        { address: LOGO_COLLECTION, name: 'Logo', symbol: 'LOGO', hasNFTs: true, standalone: true }
+        { address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', hasNFTs: true, label: 'Independent Single 1/1 Edition (Direct Smart Contract)' }
       ],
-      factories: {
-        collection_factory: COLLECTION_FACTORY
-      },
       supabase: sqlOk ? `connected (America us-east-1) - Org: Work-in-Progress-NFTs Project: WIP-nfts - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting - check DATABASE_URL pooler 6543' : 'not connected - set DATABASE_URL - Supabase Org Work-in-Progress-NFTs Project WIP-nfts'),
       cloud_sql: sqlOk ? `connected (us-east1) - ${colCount} collections` : (process.env.DATABASE_URL ? 'connecting' : 'not connected - set DATABASE_URL'),
       database_provider: 'supabase',
@@ -222,15 +200,12 @@ async function startServer() {
       royaltyWallet: ROYALTY_WALLET,
       usdc: USDC_POLYGON,
       collections: [
-        { name: 'Work-In-Progress-NFTs', address: WIP_COLLECTION, symbol: 'WIP', chain: 'polygon', standalone: true, hasNFTs: true },
-        { name: 'Logo', address: LOGO_COLLECTION, symbol: 'LOGO', chain: 'polygon', standalone: true, hasNFTs: true }
+        { name: 'Work-In-Progress-NFTs', address: WIP_COLLECTION, symbol: 'WIP', chain: 'polygon', source: 'thirdweb', hasNFTs: true },
+        { name: 'WIP Logo Collection', address: LOGO_COLLECTION, symbol: 'WIPLOGO', chain: 'polygon', source: 'wipfactory', hasNFTs: true, label: 'Independent Single 1/1 Edition (Direct Smart Contract)' }
       ],
-      factories: {
-        collection_factory: COLLECTION_FACTORY
-      },
       status: "LIVE - Green check success - Supabase Org Work-in-Progress-NFTs Project WIP-nfts America us-east-1",
       supabase: { org: 'Work-in-Progress-NFTs', project: 'WIP-nfts', region: 'America us-east-1', pooler: 'aws-0-us-east-1.pooler.supabase.com:6543' },
-      note: "Fee collector 0x063A routes to feeWallet 0xB30e + royaltyWallet 0xBaB0"
+      note: "One-click lowercase fix for bad address checksum error + Supabase SSL fix"
     });
   });
 
@@ -289,70 +264,27 @@ async function startServer() {
       source: 'hardcoded',
       data: [
         { chain: 'polygon', contract_address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', total_supply: 1 },
-        { chain: 'polygon', contract_address: LOGO_COLLECTION, name: 'Logo', symbol: 'LOGO', total_supply: 1 }
+        { chain: 'polygon', contract_address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', total_supply: 1 }
       ]
     });
   });
 
-  // === AUTO-SYNC WIP & LOGO TOKENS - FIXED FOR OLD NFTs + NUMBERING ===
-  app.get('/api/wip/tokens', async (req: Request, res: Response) => {
-    let dbTokens: any[] = [];
-    if (pool) {
-      try {
-        const { rows } = await pool.query(`
-          SELECT t.*, c.contract_address, c.name as collection_name, c.chain
-          FROM tokens t
-          LEFT JOIN collections c ON t.collection_id = c.id
-          WHERE LOWER(c.contract_address) = LOWER($1)
-             OR LOWER(c.contract_address) = LOWER($2)
-             OR c.id = '1a4eda70-3517-4bf4-acc7-6fb612fcbec7'::uuid
-             OR t.collection_id = 'col-wip-polygon'
-             OR t.collection_id = 'col-wip-logo-polygon'
-          ORDER BY t.created_at ASC
-        `, [WIP_COLLECTION, LOGO_COLLECTION]);
-        if (rows) dbTokens = rows;
-      } catch (e) {
-        console.warn('WIP tokens query fallback:', e);
-        try {
-          const { rows } = await pool.query(`SELECT * FROM tokens ORDER BY created_at ASC LIMIT 200`);
-          dbTokens = rows || [];
-        } catch {}
-      }
-    }
-    res.json({
-      success: true,
-      syncedAt: Date.now(),
-      total: dbTokens.length + liveMintedTokens.length,
-      wip_collection: WIP_COLLECTION,
-      logo_collection: LOGO_COLLECTION,
-      tokens: [...dbTokens, ...liveMintedTokens]
-    });
-  });
-
-  // === MARKET / RARITY - FIXED FOR OLD NFTs ===
+  // === MARKET / RARITY ===
   app.get('/api/market/:collectionId', async (req: Request, res: Response) => {
     const collectionId = req.params.collectionId;
     if (pool) {
       try {
         const { rows } = await pool.query(`
-          SELECT t.*, c.contract_address, c.name as collection_name,
+          SELECT t.*, 
             (SELECT json_agg(json_build_object('trait_type', tr.trait_type, 'trait_value', tr.trait_value)) 
              FROM traits tr WHERE tr.token_id = t.id) as traits
           FROM tokens t 
-          LEFT JOIN collections c ON t.collection_id = c.id
-          WHERE t.collection_id = $1 
-             OR LOWER(c.contract_address) = LOWER($1)
-             OR c.id = $1::uuid
-             OR t.collection_id IN (SELECT id FROM collections WHERE LOWER(contract_address) = LOWER($1))
-             OR t.collection_id = 'col-wip-polygon'
-             OR t.collection_id = 'col-wip-logo-polygon'
-          ORDER BY t.created_at ASC
-          LIMIT 200
+          WHERE t.collection_id = $1 OR t.collection_id IN (SELECT id FROM collections WHERE contract_address = $1)
+          ORDER BY t.rarity_rank ASC NULLS LAST, t.created_at DESC 
+          LIMIT 100
         `, [collectionId]);
         if (rows && rows.length > 0) return res.json({ source: 'supabase', data: rows });
-      } catch (e) {
-        console.warn('market query:', e);
-      }
+      } catch {}
     }
 
     if (db) {
@@ -458,33 +390,13 @@ async function startServer() {
     res.status(404).json({ error: 'Token metadata not found' });
   });
 
-  // === MINT RECORD & FEE LOGGING - FIXED NUMBERING ===
+  // === MINT RECORD & FEE LOGGING ===
   app.post('/api/mint', async (req: Request, res: Response) => {
-    let { collection_id, token_id, owner_wallet = '', metadata_ipfs_uri, traits, usdc_tx_hash, chain, name, image, price } = req.body || {};
+    const { collection_id, token_id, owner_wallet = '', metadata_ipfs_uri, traits, usdc_tx_hash, chain, name, image } = req.body || {};
     const fee = await getFee('mint');
     const ownerFree = isOwner(owner_wallet);
-    const isWip = 
-      collection_id === 'col-wip-polygon' || 
-      collection_id === 'col-wip-logo-polygon' || 
-      String(collection_id).toLowerCase() === WIP_COLLECTION.toLowerCase() || 
-      String(collection_id).toLowerCase() === LOGO_COLLECTION.toLowerCase() ||
-      String(collection_id).toLowerCase() === '1a4eda70-3517-4bf4-acc7-6fb612fcbec7';
 
-    // FIX NUMBERING: if token_id not provided or not numeric, get max existing +1
-    if (pool && (!token_id || isNaN(parseInt(String(token_id))))) {
-      try {
-        const { rows } = await pool.query(`
-          SELECT MAX(CAST(token_id AS INTEGER)) as max_id FROM tokens 
-          WHERE collection_id = $1 OR collection_id IN (SELECT id FROM collections WHERE LOWER(contract_address) = LOWER($1))
-        `, [collection_id]);
-        const maxId = rows[0]?.max_id || 0;
-        token_id = String(parseInt(maxId) + 1);
-      } catch {
-        token_id = String(Date.now());
-      }
-    }
-
-    if (!ownerFree && !isWip && fee > 0 && !usdc_tx_hash) {
+    if (!ownerFree && fee > 0 && !usdc_tx_hash) {
       return res.status(402).json({
         error: 'USDC fee required',
         fee_usdc: fee,
@@ -561,22 +473,6 @@ async function startServer() {
         console.warn('Firestore setDoc notice:', e);
       }
     }
-
-    const mintedRecord = {
-      id: tokenDbId,
-      token_id,
-      name: name || token_id,
-      image: image || '',
-      image_ipfs_uri: image || '',
-      collection_id,
-      owner_wallet,
-      chain: chain || 'polygon',
-      metadata_ipfs_uri,
-      traits: traits || [],
-      price: price !== undefined ? Number(price) : (collection_id === 'col-wip-logo-polygon' || String(collection_id).toLowerCase() === LOGO_COLLECTION.toLowerCase() ? 50.0 : 25.0),
-      created_at: new Date().toISOString()
-    };
-    liveMintedTokens.unshift(mintedRecord);
 
     res.json({
       success: true,
@@ -732,12 +628,12 @@ async function startServer() {
     if (pool) {
       try {
         const { rows } = await pool.query(
-          'INSERT INTO bridge_jobs (token_id, from_chain, to_chain, status) VALUES ($1,$2,$3,'pending') RETURNING *',
+          'INSERT INTO bridge_jobs (token_id, from_chain, to_chain, status) VALUES ($1,$2,$3,\'pending\') RETURNING *',
           [token_id, from_chain, to_chain]
         );
         if (rows && rows[0]?.id) jobId = rows[0].id;
         await pool.query(
-          'INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,'bridge',$2,$3,$4,$5)',
+          'INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,\'bridge\',$2,$3,$4,$5)',
           [wallet, ownerFree ? 0 : fee, usdc_tx_hash || null, from_chain, ownerFree]
         );
       } catch (e) {
@@ -895,7 +791,7 @@ async function startServer() {
     res.json({ success: true, localOnly: true });
   });
 
-  // === TRANSACTIONS LOG - RESTORED WHOLE ===
+  // === TRANSACTIONS LOG ===
   app.get('/api/transactions/:wallet', async (req: Request, res: Response) => {
     const wallet = req.params.wallet;
     if (pool) {
@@ -907,7 +803,7 @@ async function startServer() {
     res.json([]);
   });
 
-  // === SITE LINKS - Website, Socials, Blog, Newsletter ===
+  // === SITE LINKS ===
   app.get('/api/site-links', async (req: Request, res: Response) => {
     if (pool) {
       try {
@@ -1233,39 +1129,25 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
 
   // === VITE / STATIC SERVING ===
   if (process.env.NODE_ENV !== "production") {
-    try {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
-    } catch (err) {
-      console.warn('Vite dev middleware initialization error:', err);
-    }
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      const indexPath = path.join(distPath, 'index.html');
-      res.sendFile(indexPath, (err) => {
-        if (err && !res.headersSent) {
-          res.status(500).send('Index file could not be served');
-        }
-      });
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 WIP NFT LIVE FULL SUPABASE EDITION - Running on http://0.0.0.0:${PORT}`);
     console.log(`Fee Collector: ${FEE_COLLECTOR_ADDRESS} (Block 93415806) | Fee Wallet: ${FEE_WALLET} YOU GET PAID`);
     console.log(`Collections: WIP (${WIP_COLLECTION}) & WIPLOGO (${LOGO_COLLECTION}) - Independent Single 1/1 Edition`);
     console.log(`Supabase Org: Work-in-Progress-NFTs Project: WIP-nfts America us-east-1 Pooler: aws-0-us-east-1.pooler.supabase.com:6543 - SSL: rejectUnauthorized false`);
     console.log(`Firestore DB: ${firebaseConfig.firestoreDatabaseId} - Gemini: gemini-3.8-flash - API: /api/health, /api/ai/*, /api/site-links, /api/app-access (public)`);
-  });
-
-  server.on('error', (err: any) => {
-    console.error(`Server error on port ${PORT}:`, err);
   });
 }
 
