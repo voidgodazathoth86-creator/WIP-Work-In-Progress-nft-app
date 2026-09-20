@@ -294,7 +294,7 @@ async function startServer() {
     });
   });
 
-  // === AUTO-SYNC WIP & LOGO TOKENS - FINAL - UUID FIX - NO PLACEHOLDERS ===
+  // === AUTO-SYNC WIP & LOGO TOKENS - FIXED FOR OLD NFTs + NUMBERING ===
   app.get('/api/wip/tokens', async (req: Request, res: Response) => {
     let dbTokens: any[] = [];
     if (pool) {
@@ -302,18 +302,19 @@ async function startServer() {
         const { rows } = await pool.query(`
           SELECT t.*, c.contract_address, c.name as collection_name, c.chain
           FROM tokens t
-          JOIN collections c ON t.collection_id = c.id
+          LEFT JOIN collections c ON t.collection_id = c.id
           WHERE LOWER(c.contract_address) = LOWER($1)
              OR LOWER(c.contract_address) = LOWER($2)
              OR c.id = '1a4eda70-3517-4bf4-acc7-6fb612fcbec7'::uuid
-          ORDER BY t.token_id::int ASC
+             OR t.collection_id = 'col-wip-polygon'
+             OR t.collection_id = 'col-wip-logo-polygon'
+          ORDER BY t.created_at ASC
         `, [WIP_COLLECTION, LOGO_COLLECTION]);
         if (rows) dbTokens = rows;
       } catch (e) {
-        console.warn('WIP tokens query:', e);
-        // fallback without join
+        console.warn('WIP tokens query fallback:', e);
         try {
-          const { rows } = await pool.query(`SELECT * FROM tokens ORDER BY token_id::int ASC LIMIT 100`);
+          const { rows } = await pool.query(`SELECT * FROM tokens ORDER BY created_at ASC LIMIT 200`);
           dbTokens = rows || [];
         } catch {}
       }
@@ -328,22 +329,30 @@ async function startServer() {
     });
   });
 
-  // === MARKET / RARITY ===
+  // === MARKET / RARITY - FIXED FOR OLD NFTs ===
   app.get('/api/market/:collectionId', async (req: Request, res: Response) => {
     const collectionId = req.params.collectionId;
     if (pool) {
       try {
         const { rows } = await pool.query(`
-          SELECT t.*, 
+          SELECT t.*, c.contract_address, c.name as collection_name,
             (SELECT json_agg(json_build_object('trait_type', tr.trait_type, 'trait_value', tr.trait_value)) 
              FROM traits tr WHERE tr.token_id = t.id) as traits
           FROM tokens t 
-          WHERE t.collection_id = $1 OR t.collection_id IN (SELECT id FROM collections WHERE contract_address = $1)
-          ORDER BY t.rarity_rank ASC NULLS LAST, t.created_at DESC 
-          LIMIT 100
+          LEFT JOIN collections c ON t.collection_id = c.id
+          WHERE t.collection_id = $1 
+             OR LOWER(c.contract_address) = LOWER($1)
+             OR c.id = $1::uuid
+             OR t.collection_id IN (SELECT id FROM collections WHERE LOWER(contract_address) = LOWER($1))
+             OR t.collection_id = 'col-wip-polygon'
+             OR t.collection_id = 'col-wip-logo-polygon'
+          ORDER BY t.created_at ASC
+          LIMIT 200
         `, [collectionId]);
         if (rows && rows.length > 0) return res.json({ source: 'supabase', data: rows });
-      } catch {}
+      } catch (e) {
+        console.warn('market query:', e);
+      }
     }
 
     if (db) {
@@ -449,16 +458,31 @@ async function startServer() {
     res.status(404).json({ error: 'Token metadata not found' });
   });
 
-  // === MINT RECORD & FEE LOGGING ===
+  // === MINT RECORD & FEE LOGGING - FIXED NUMBERING ===
   app.post('/api/mint', async (req: Request, res: Response) => {
-    const { collection_id, token_id, owner_wallet = '', metadata_ipfs_uri, traits, usdc_tx_hash, chain, name, image, price } = req.body || {};
+    let { collection_id, token_id, owner_wallet = '', metadata_ipfs_uri, traits, usdc_tx_hash, chain, name, image, price } = req.body || {};
     const fee = await getFee('mint');
     const ownerFree = isOwner(owner_wallet);
     const isWip = 
       collection_id === 'col-wip-polygon' || 
       collection_id === 'col-wip-logo-polygon' || 
       String(collection_id).toLowerCase() === WIP_COLLECTION.toLowerCase() || 
-      String(collection_id).toLowerCase() === LOGO_COLLECTION.toLowerCase();
+      String(collection_id).toLowerCase() === LOGO_COLLECTION.toLowerCase() ||
+      String(collection_id).toLowerCase() === '1a4eda70-3517-4bf4-acc7-6fb612fcbec7';
+
+    // FIX NUMBERING: if token_id not provided or not numeric, get max existing +1
+    if (pool && (!token_id || isNaN(parseInt(String(token_id))))) {
+      try {
+        const { rows } = await pool.query(`
+          SELECT MAX(CAST(token_id AS INTEGER)) as max_id FROM tokens 
+          WHERE collection_id = $1 OR collection_id IN (SELECT id FROM collections WHERE LOWER(contract_address) = LOWER($1))
+        `, [collection_id]);
+        const maxId = rows[0]?.max_id || 0;
+        token_id = String(parseInt(maxId) + 1);
+      } catch {
+        token_id = String(Date.now());
+      }
+    }
 
     if (!ownerFree && !isWip && fee > 0 && !usdc_tx_hash) {
       return res.status(402).json({
