@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { 
   BlockchainNetwork, 
   ChainConfig, 
+  NetworkMode,
   NFT, 
   NFTCollection, 
   WalletAccount, 
@@ -29,7 +30,15 @@ import {
   getBridgedContractAddress, 
   getRequiredConfirmations 
 } from '../services/bridgeService';
-import { WIP_COLLECTION, ENFORCE_ROYALTIES, ROYALTY_WALLET } from '../config/wipCollection';
+import { 
+  WIP_COLLECTION, 
+  WIP_LOGO_COLLECTION, 
+  COLLECTION_FACTORY_1000, 
+  ENFORCE_ROYALTIES, 
+  ROYALTY_WALLET,
+  WIP_AUTHORIZED_MINTERS,
+  isAuthorizedWipMinter
+} from '../config/wipCollection';
 import { factoryABI } from '../abi/factoryABI';
 
 // Built-in Keyring accounts for immediate full-featured testing
@@ -70,7 +79,7 @@ export const DEMO_ACCOUNTS: WalletAccount[] = [
   },
   {
     address: ROYALTY_WALLET,
-    name: 'WIP Royalty Receiver Vault',
+    name: 'WIP Authorized Creator Vault (0xBaB0...)',
     avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=150&q=80',
     type: 'demo',
     providerName: 'Studio Keyring',
@@ -85,6 +94,23 @@ export const DEMO_ACCOUNTS: WalletAccount[] = [
     },
     privateKey: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
   },
+  {
+    address: '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0',
+    name: 'WIP Authorized Co-Creator Vault (0xB30e...)',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+    type: 'demo',
+    providerName: 'Studio Keyring',
+    balances: {
+      ethereum: 4.50,
+      polygon: 350.0,
+      arbitrum: 2.10,
+      base: 1.50,
+      solana: 12.0,
+      avalanche: 35.0,
+      bsc: 3.5,
+    },
+    privateKey: '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d',
+  },
 ];
 
 interface Web3ContextType {
@@ -93,6 +119,9 @@ interface Web3ContextType {
   currentChainConfig: ChainConfig;
   allChains: ChainConfig[];
   switchChain: (chain: BlockchainNetwork) => void;
+  networkMode: NetworkMode;
+  setNetworkMode: (mode: NetworkMode) => void;
+  toggleNetworkMode: () => void;
 
   // Gas
   gasData: GasEstimation;
@@ -119,6 +148,9 @@ interface Web3ContextType {
   bridgeTransactions: BridgeTransaction[];
   wipConfig: typeof WIP_COLLECTION;
   isWipCollection: (contractOrCollectionId: string) => boolean;
+  isAuthorizedWipMinter: (address?: string) => boolean;
+  isCurrentUserAuthorizedWipMinter: boolean;
+  wipAuthorizedMinters: readonly string[];
 
   // Actions
   mintNFT: (nftData: Partial<NFT>, gasSpeed?: 'slow' | 'standard' | 'fast' | 'instant') => Promise<{ success: boolean; nft?: NFT; txHash?: string; error?: string }>;
@@ -155,6 +187,14 @@ interface Web3ContextType {
   }) => Promise<{ success: boolean; bridgeTx?: BridgeTransaction; error?: string }>;
   clearBridgeHistory: () => void;
   batchUpdateRoyalties: (updates: BatchRoyaltyUpdateItem[]) => Promise<BatchRoyaltyResult>;
+
+  // Auto-Sync for Work In Progress - WIP & Logo Collections
+  isAutoSyncing: boolean;
+  autoSyncEnabled: boolean;
+  toggleAutoSync: () => void;
+  lastSyncTimestamp: number | null;
+  syncWipCollections: (silent?: boolean) => Promise<{ success: boolean; totalWipCount: number; newCount: number }>;
+  wipTotalCount: number;
   
   // Stats
   totalPortfolioValueUsd: number;
@@ -169,6 +209,7 @@ const STORAGE_KEYS = {
   TRANSACTIONS: 'crosschain_nft_platform_txs_v1',
   ROYALTIES: 'crosschain_nft_platform_royalties_v1',
   ACTIVE_CHAIN: 'crosschain_nft_platform_active_chain',
+  NETWORK_MODE: 'crosschain_nft_platform_network_mode',
   WALLET_INDEX: 'crosschain_nft_platform_wallet_index',
   BALANCES: 'crosschain_nft_platform_wallet_balances_v1',
   BRIDGE_TXS: 'crosschain_nft_platform_bridge_txs_v1',
@@ -177,9 +218,25 @@ const STORAGE_KEYS = {
 export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Active Chain
   const [activeChain, setActiveChain] = useState<BlockchainNetwork>(() => {
+    const defaultApplied = localStorage.getItem('wip_nft_default_polygon_applied_v1');
+    if (!defaultApplied) {
+      localStorage.setItem('wip_nft_default_polygon_applied_v1', 'true');
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_CHAIN, 'polygon');
+      return 'polygon';
+    }
     const saved = localStorage.getItem(STORAGE_KEYS.ACTIVE_CHAIN);
-    return (saved && SUPPORTED_CHAINS[saved as BlockchainNetwork]) ? (saved as BlockchainNetwork) : 'ethereum';
+    return (saved && SUPPORTED_CHAINS[saved as BlockchainNetwork]) ? (saved as BlockchainNetwork) : 'polygon';
   });
+
+  // Network Mode: Mainnet vs Testnet
+  const [networkMode, setNetworkMode] = useState<NetworkMode>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.NETWORK_MODE);
+    return (saved === 'mainnet' || saved === 'testnet') ? (saved as NetworkMode) : 'mainnet';
+  });
+
+  const toggleNetworkMode = () => {
+    setNetworkMode(prev => (prev === 'mainnet' ? 'testnet' : 'mainnet'));
+  };
 
   // Wallet
   const [accounts, setAccounts] = useState<WalletAccount[]>(() => {
@@ -225,14 +282,21 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          list = parsed;
+          const existingIds = new Set(parsed.map((n: NFT) => n.id));
+          const missingInitial = INITIAL_NFTS.filter(n => !existingIds.has(n.id));
+          list = [...parsed, ...missingInitial];
         }
       } catch {}
     }
-    const hasWip = list.some(n => n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
-    if (!hasWip) {
-      const wipNfts = INITIAL_NFTS.filter(n => n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
-      list = [...wipNfts, ...list];
+    const existingIds = new Set(list.map(n => n.id));
+    const missingWip = INITIAL_NFTS.filter(n => 
+      (n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+       n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
+       n.collectionId === 'col-wip-polygon' ||
+       n.collectionId === 'col-wip-logo-polygon') && !existingIds.has(n.id)
+    );
+    if (missingWip.length > 0) {
+      list = [...missingWip, ...list];
     }
     return list;
   });
@@ -244,7 +308,9 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          list = parsed;
+          const existingIds = new Set(parsed.map((c: NFTCollection) => c.id || c.contractAddress?.toLowerCase()));
+          const missingInitial = INITIAL_COLLECTIONS.filter(c => !existingIds.has(c.id) && !existingIds.has(c.contractAddress?.toLowerCase()));
+          list = [...parsed, ...missingInitial];
         }
       } catch {}
     }
@@ -253,6 +319,13 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const wipCol = INITIAL_COLLECTIONS.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
       if (wipCol) {
         list = [wipCol, ...list];
+      }
+    }
+    const hasWipLogo = list.some(c => c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase());
+    if (!hasWipLogo) {
+      const wipLogoCol = INITIAL_COLLECTIONS.find(c => c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase());
+      if (wipLogoCol) {
+        list = [wipLogoCol, ...list];
       }
     }
     return list;
@@ -310,6 +383,10 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [activeChain]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.NETWORK_MODE, networkMode);
+  }, [networkMode]);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.WALLET_INDEX, activeAccountIndex.toString());
   }, [activeAccountIndex]);
 
@@ -320,6 +397,160 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
     localStorage.setItem(STORAGE_KEYS.BALANCES, JSON.stringify(balanceMap));
   }, [accounts]);
+
+  const activeAccount = accounts[activeAccountIndex] || accounts[0];
+
+  // === AUTO-SYNC WORK IN PROGRESS - WIP & LOGO COLLECTIONS ===
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<number | null>(() => Date.now());
+
+  const wipTotalCount = nfts.filter(n => 
+    n.collectionId === 'col-wip-polygon' || 
+    n.collectionId === 'col-wip-logo-polygon' ||
+    n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+    n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()
+  ).length;
+
+  const toggleAutoSync = useCallback(() => {
+    setAutoSyncEnabled(prev => !prev);
+  }, []);
+
+  const syncWipCollections = useCallback(async (silent = false): Promise<{ success: boolean; totalWipCount: number; newCount: number }> => {
+    if (!silent) setIsAutoSyncing(true);
+    let newItemsAdded = 0;
+
+    try {
+      // 1. Ensure all standard WIP & Logo NFTs from initial data exist
+      const currentIds = new Set(nfts.map(n => n.id));
+      const missingInitialWip = INITIAL_NFTS.filter(n => 
+        (n.collectionId === 'col-wip-polygon' ||
+         n.collectionId === 'col-wip-logo-polygon' ||
+         n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+         n.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()) &&
+        !currentIds.has(n.id)
+      );
+
+      let updatedList = [...nfts];
+      if (missingInitialWip.length > 0) {
+        updatedList = [...missingInitialWip, ...updatedList];
+        newItemsAdded += missingInitialWip.length;
+      }
+
+      // 2. Fetch server-side live minted tokens or Supabase tokens from /api/wip/tokens
+      try {
+        const res = await fetch('/api/wip/tokens');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.tokens)) {
+            const currentTokenIdsOrNames = new Set(updatedList.map(n => n.id));
+            const newRemoteNFTs: NFT[] = [];
+
+            for (const t of json.tokens) {
+              const syntheticId = `nft-live-${t.id || t.token_id}`;
+              if (!currentTokenIdsOrNames.has(syntheticId) && !currentTokenIdsOrNames.has(t.id)) {
+                const isLogo = t.collection_id === 'col-wip-logo-polygon' || 
+                  t.contract_address?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
+                  String(t.name || '').toLowerCase().includes('logo');
+                const col = isLogo ? WIP_LOGO_COLLECTION : WIP_COLLECTION;
+
+                const newNft: NFT = {
+                  id: t.id ? (String(t.id).startsWith('nft-') ? t.id : `nft-${t.id}`) : syntheticId,
+                  tokenId: t.token_id ? (String(t.token_id).startsWith('#') ? t.token_id : `#${t.token_id}`) : `#${Math.floor(1000 + Math.random()*9000)}`,
+                  name: t.name || `${col.name} #${t.token_id || 'Mint'}`,
+                  description: t.description || `Official minted item in ${col.name} on Polygon. Auto-synchronized with 10% secondary royalty.`,
+                  image: t.image || t.image_ipfs_uri || (isLogo ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80' : 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80'),
+                  chainId: 'polygon',
+                  standard: 'ERC-721',
+                  collectionId: col.id,
+                  collectionName: col.name,
+                  creatorAddress: col.royaltyReceiver,
+                  creatorName: 'WIP Collective',
+                  ownerAddress: t.owner_wallet || activeAccount.address,
+                  ownerName: t.owner_wallet ? `${t.owner_wallet.slice(0, 6)}...${t.owner_wallet.slice(-4)}` : activeAccount.name,
+                  royaltyPercentage: col.royaltyBps / 100,
+                  royaltyPayoutAddress: col.royaltyReceiver,
+                  price: t.price || (isLogo ? 50.0 : 25.0),
+                  isListed: true,
+                  listedAt: Date.now(),
+                  createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
+                  traits: t.traits || [
+                    { trait_type: 'Collection', value: col.name, rarityPercentage: 5 },
+                    { trait_type: 'Auto Sync Status', value: 'Live On-Chain Synchronized', rarityPercentage: 100 },
+                    { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
+                  ],
+                  ipfsMetadataUri: t.metadata_ipfs_uri || `ipfs://QmWipAutoSync${Date.now()}`,
+                  ipfsImageUri: t.image || t.image_ipfs_uri || `ipfs://QmWipAutoSyncImage${Date.now()}`,
+                  contractAddress: col.contractAddress,
+                  txHash: t.tx_hash || `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
+                  editionTotal: 1,
+                  editionNumber: 1,
+                  viewsCount: Math.floor(20 + Math.random()*150),
+                  likesCount: Math.floor(Math.random()*40),
+                };
+                newRemoteNFTs.push(newNft);
+              }
+            }
+
+            if (newRemoteNFTs.length > 0) {
+              updatedList = [...newRemoteNFTs, ...updatedList];
+              newItemsAdded += newRemoteNFTs.length;
+            }
+          }
+        }
+      } catch (err) {
+        // Backend offline or local fallback
+      }
+
+      if (newItemsAdded > 0) {
+        setNfts(updatedList);
+        localStorage.setItem(STORAGE_KEYS.NFTS, JSON.stringify(updatedList));
+      }
+
+      // Update collection currentSupply to match actual count of NFTs
+      const wipCount = updatedList.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length;
+      const logoCount = updatedList.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length;
+
+      setCollections(prevCols => prevCols.map(col => {
+        if (col.id === 'col-wip-polygon' || col.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()) {
+          return { ...col, currentSupply: wipCount };
+        }
+        if (col.id === 'col-wip-logo-polygon' || col.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()) {
+          return { ...col, currentSupply: logoCount };
+        }
+        return col;
+      }));
+
+      setLastSyncTimestamp(Date.now());
+      return { success: true, totalWipCount: wipCount + logoCount, newCount: newItemsAdded };
+    } finally {
+      if (!silent) {
+        setTimeout(() => setIsAutoSyncing(false), 400);
+      }
+    }
+  }, [nfts, activeAccount]);
+
+  // Periodic Auto-Sync Effect for WIP Mints
+  useEffect(() => {
+    if (!autoSyncEnabled) return;
+    syncWipCollections(true);
+
+    const intervalId = setInterval(() => {
+      syncWipCollections(true);
+    }, 12000);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEYS.NFTS) {
+        syncWipCollections(true);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [autoSyncEnabled, syncWipCollections]);
 
   // Live fluctuating gas fee estimation
   useEffect(() => {
@@ -338,8 +569,35 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => clearInterval(interval);
   }, [activeChain]);
 
-  const currentChainConfig = SUPPORTED_CHAINS[activeChain];
-  const activeAccount = accounts[activeAccountIndex] || accounts[0];
+  // Dynamically resolve currentChainConfig based on networkMode (mainnet vs testnet)
+  const currentChainConfig: ChainConfig = useMemo(() => {
+    const rawConfig = SUPPORTED_CHAINS[activeChain] || SUPPORTED_CHAINS.polygon;
+    const isMain = networkMode === 'mainnet';
+    return {
+      ...rawConfig,
+      isTestnet: !isMain,
+      chainId: isMain ? (rawConfig.mainnetChainId || rawConfig.chainId) : rawConfig.chainId,
+      rpcUrl: isMain ? (rawConfig.mainnetRpcUrl || rawConfig.rpcUrl) : rawConfig.rpcUrl,
+      blockExplorer: isMain ? (rawConfig.mainnetExplorer || rawConfig.blockExplorer) : rawConfig.blockExplorer,
+      testnetName: isMain ? (rawConfig.mainnetName || rawConfig.name) : rawConfig.testnetName,
+    };
+  }, [activeChain, networkMode]);
+
+  // Dynamically configure CHAIN_LIST based on active networkMode
+  const dynamicChainList = useMemo(() => {
+    return CHAIN_LIST.map(chain => {
+      const isMain = networkMode === 'mainnet';
+      return {
+        ...chain,
+        isTestnet: !isMain,
+        chainId: isMain ? (chain.mainnetChainId || chain.chainId) : chain.chainId,
+        rpcUrl: isMain ? (chain.mainnetRpcUrl || chain.rpcUrl) : chain.rpcUrl,
+        blockExplorer: isMain ? (chain.mainnetExplorer || chain.blockExplorer) : chain.blockExplorer,
+        testnetName: isMain ? (chain.mainnetName || chain.name) : chain.testnetName,
+      };
+    });
+  }, [networkMode]);
+
   const activeBalance = activeAccount.balances[activeChain] ?? 0;
 
   const gasData = calculateGasTiers(activeChain, currentChainConfig.baseGwei * baseGweiMultiplier);
@@ -519,6 +777,30 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const tier = gasData.tiers[speed];
     const gasFee = tier.estCostCrypto;
 
+    const matchedCol = nftData.collectionId 
+      ? (collections.find(c => c.id === nftData.collectionId) || 
+         (nftData.collectionId === 'col-contract-1000' || nftData.collectionId === 'col-wip-1000' 
+           ? collections.find(c => c.id === 'col-contract-1000' || c.contractAddress.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase()) 
+           : undefined)) 
+      : undefined;
+    const contractAddr = nftData.contractAddress || matchedCol?.contractAddress || `0x${Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
+
+    const isWip = 
+      nftData.collectionId === 'col-wip-polygon' || 
+      nftData.collectionId === 'col-wip-logo-polygon' ||
+      contractAddr.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+      contractAddr.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
+      (!!nftData.collectionName && nftData.collectionName.toLowerCase().includes('work in progress') && !nftData.collectionName.toLowerCase().includes('collection contract'));
+
+    // STRICT PERMISSION LOCK:
+    // Only 0xBaB06d358B181eB16e3189525BCc0bc4761a3762 & 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0 are allowed to mint to WIP collections
+    if (isWip && !isAuthorizedWipMinter(activeAccount.address)) {
+      return {
+        success: false,
+        error: `Permission Denied: Work In Progress - WIP collection & WIP logo collection are locked. Only authorized creators (${WIP_AUTHORIZED_MINTERS[0]} & ${WIP_AUTHORIZED_MINTERS[1]}) can mint to those collections. Please switch to an authorized wallet or choose "Collection Contract (1/1000)" or "Independent Single 1/1 Edition".`,
+      };
+    }
+
     // Verify balance
     const currentBal = activeAccount.balances[targetChain] || 0;
     if (currentBal < gasFee) {
@@ -545,30 +827,43 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const txHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
     const tokenIdHex = `#${Math.floor(1000 + Math.random() * 9000)}`;
     const newNftId = `nft-${Date.now()}`;
-    const contractAddr = nftData.contractAddress || `0x${Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
+
+    const isCol1000 =
+      nftData.collectionId === 'col-contract-1000' ||
+      nftData.collectionId === 'col-wip-1000' ||
+      contractAddr.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase();
+
+    const isLogo = nftData.collectionId === 'col-wip-logo-polygon' || contractAddr.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
+    const defaultWipPrice = isLogo ? 50.0 : 25.0;
+    const computedPrice = nftData.price !== undefined && nftData.price > 0 ? nftData.price : (isWip ? defaultWipPrice : (isCol1000 ? 30.0 : undefined));
+    const isListed = isWip ? true : (!!computedPrice && computedPrice > 0);
 
     const newNft: NFT = {
       id: newNftId,
       tokenId: tokenIdHex,
-      name: nftData.name || 'Untitled Masterpiece',
-      description: nftData.description || 'Exclusive on-chain NFT minted with cross-chain standard.',
+      name: nftData.name || (isWip ? `${matchedCol?.name || 'WIP NFT'} ${tokenIdHex}` : (isCol1000 ? `${matchedCol?.name || 'Edition'} ${tokenIdHex}` : 'Untitled Masterpiece')),
+      description: nftData.description || (isWip ? `Official authenticated item in ${matchedCol?.name || 'Work In Progress Collection'} on Polygon.` : (isCol1000 ? `Verified 1/1000 smart contract edition minted via Collection Factory on Polygon (${COLLECTION_FACTORY_1000.contractAddress}).` : 'Exclusive on-chain NFT minted with cross-chain standard.')),
       image: nftData.image || '',
       animationUrl: nftData.animationUrl,
       chainId: targetChain,
       standard: nftData.standard || chainConfig.standard,
-      collectionId: nftData.collectionId,
-      collectionName: nftData.collectionName || (nftData.collectionId ? collections.find(c => c.id === nftData.collectionId)?.name : 'Single Editions'),
-      creatorAddress: activeAccount.address,
-      creatorName: activeAccount.name,
+      collectionId: nftData.collectionId === 'col-wip-1000' ? 'col-contract-1000' : nftData.collectionId,
+      collectionName: nftData.collectionName || matchedCol?.name || (isCol1000 ? 'Collection Contract (1/1000)' : (nftData.collectionId ? 'Collection Item' : 'Single Editions')),
+      creatorAddress: isWip ? (isLogo ? WIP_LOGO_COLLECTION.royaltyReceiver : WIP_COLLECTION.royaltyReceiver) : (isCol1000 ? (nftData.creatorAddress || activeAccount.address) : activeAccount.address),
+      creatorName: isWip ? 'WIP Collective' : (isCol1000 ? (activeAccount.name || 'Collection Creator') : activeAccount.name),
       ownerAddress: activeAccount.address,
       ownerName: activeAccount.name,
-      royaltyPercentage: nftData.royaltyPercentage ?? 5.0,
-      royaltyPayoutAddress: nftData.royaltyPayoutAddress || activeAccount.address,
-      price: nftData.price,
-      isListed: !!nftData.price && (nftData.price > 0),
-      listedAt: nftData.price ? Date.now() : undefined,
+      royaltyPercentage: isWip ? 10.0 : (isCol1000 ? 10.0 : (nftData.royaltyPercentage ?? 5.0)),
+      royaltyPayoutAddress: isWip ? (isLogo ? WIP_LOGO_COLLECTION.royaltyReceiver : WIP_COLLECTION.royaltyReceiver) : (isCol1000 ? (nftData.royaltyPayoutAddress || activeAccount.address) : (nftData.royaltyPayoutAddress || activeAccount.address)),
+      price: computedPrice,
+      isListed,
+      listedAt: isListed ? Date.now() : undefined,
       createdAt: Date.now(),
-      traits: nftData.traits || [],
+      traits: isWip && (!nftData.traits || nftData.traits.length === 0) ? [
+        { trait_type: 'Collection', value: matchedCol?.name || 'Work In Progress - WIP', rarityPercentage: 5 },
+        { trait_type: 'Auto-Sync', value: 'Instant Marketplace Active', rarityPercentage: 100 },
+        { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 }
+      ] : (nftData.traits || []),
       ipfsMetadataUri: `ipfs://Qm${Array.from({length: 44}, () => Math.floor(Math.random()*36).toString(36)).join('')}`,
       ipfsImageUri: `ipfs://Qm${Array.from({length: 44}, () => Math.floor(Math.random()*36).toString(36)).join('')}`,
       contractAddress: contractAddr,
@@ -582,6 +877,34 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     setNfts(prev => [newNft, ...prev]);
+
+    if (isWip) {
+      // Update collection supply
+      setCollections(prev => prev.map(c => {
+        if (c.id === nftData.collectionId || c.contractAddress.toLowerCase() === contractAddr.toLowerCase()) {
+          return { ...c, currentSupply: c.currentSupply + 1 };
+        }
+        return c;
+      }));
+
+      // Post to backend /api/mint for persistent cross-session sync
+      fetch('/api/mint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          collection_id: nftData.collectionId || (isLogo ? 'col-wip-logo-polygon' : 'col-wip-polygon'),
+          token_id: tokenIdHex,
+          name: newNft.name,
+          image: newNft.image,
+          owner_wallet: activeAccount.address,
+          chain: 'polygon',
+          traits: newNft.traits,
+          price: newNft.price,
+        }),
+      }).catch(() => {});
+
+      setLastSyncTimestamp(Date.now());
+    }
 
     // Record Mint Transaction
     const newTx: TransactionRecord = {
@@ -690,13 +1013,14 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCollections(prev => [newCollection, ...prev]);
 
     // Record deployment tx
+    const factoryAddress = targetChain === 'polygon' ? COLLECTION_FACTORY_1000.contractAddress : contractAddress;
     const newTx: TransactionRecord = {
       id: `tx-${Date.now()}`,
       type: 'deploy_collection',
       txHash,
       chainId: targetChain,
       fromAddress: activeAccount.address,
-      toAddress: contractAddress,
+      toAddress: factoryAddress,
       amountCrypto: 0,
       amountUsd: 0,
       gasUsedCrypto: deployGasCost,
@@ -742,6 +1066,25 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     let deployGasCost = 0;
     let newlyCreatedCollection: NFTCollection | undefined = undefined;
+
+    // Check permissions if targeting existing collection
+    if (config.targetMode === 'existing_collection' && config.existingCollectionId) {
+      const existingCol = collections.find(c => c.id === config.existingCollectionId);
+      if (existingCol) {
+        const isBulkTargetWip = 
+          existingCol.id === 'col-wip-polygon' || 
+          existingCol.id === 'col-wip-logo-polygon' ||
+          existingCol.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+          existingCol.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
+
+        if (isBulkTargetWip && !isAuthorizedWipMinter(activeAccount.address)) {
+          return {
+            success: false,
+            error: `Permission Denied: Work In Progress - WIP collection & WIP logo collection are locked. Only authorized creators (${WIP_AUTHORIZED_MINTERS[0]} & ${WIP_AUTHORIZED_MINTERS[1]}) can mint to those collections.`,
+          };
+        }
+      }
+    }
 
     if (config.targetMode === 'new_collection') {
       deployGasCost = gasData.actionsEstimate.mintCollection.crypto;
@@ -852,8 +1195,17 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const itemTxHash = index === 0 ? batchTxHash : `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
       const tokenIdNumber = index + 1;
       const tokenIdString = `#${String(tokenIdNumber).padStart(3, '0')}`;
-      const itemPrice = item.price !== undefined ? item.price : (config.isInstantListAll ? config.defaultPrice : undefined);
-      const isListed = !!itemPrice && itemPrice > 0;
+      
+      const isTargetWip = 
+        targetCollectionId === 'col-wip-polygon' || 
+        targetCollectionId === 'col-wip-logo-polygon' ||
+        targetContractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+        targetContractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
+
+      const isTargetLogo = targetCollectionId === 'col-wip-logo-polygon' || targetContractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
+      const defaultWipBulkPrice = isTargetLogo ? 50.0 : 25.0;
+      const itemPrice = item.price !== undefined && item.price > 0 ? item.price : (config.isInstantListAll ? config.defaultPrice : (isTargetWip ? defaultWipBulkPrice : undefined));
+      const isListed = isTargetWip ? true : (!!itemPrice && itemPrice > 0);
 
       const newNFT: NFT = {
         id: `nft-bulk-${now}-${index}-${Math.random().toString(36).substr(2, 5)}`,
@@ -1556,7 +1908,12 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const isWipCollection = (contractOrColId: string): boolean => {
     if (!contractOrColId) return false;
     const lower = contractOrColId.toLowerCase();
-    return lower === WIP_COLLECTION.contractAddress.toLowerCase() || lower === 'col-wip-polygon';
+    return (
+      lower === WIP_COLLECTION.contractAddress.toLowerCase() ||
+      lower === WIP_COLLECTION.id.toLowerCase() ||
+      lower === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
+      lower === WIP_LOGO_COLLECTION.id.toLowerCase()
+    );
   };
 
   return (
@@ -1564,8 +1921,11 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       value={{
         activeChain,
         currentChainConfig,
-        allChains: CHAIN_LIST,
+        allChains: dynamicChainList,
         switchChain,
+        networkMode,
+        setNetworkMode,
+        toggleNetworkMode,
 
         gasData,
         selectedGasSpeed,
@@ -1589,6 +1949,9 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         bridgeTransactions,
         wipConfig: WIP_COLLECTION,
         isWipCollection,
+        isAuthorizedWipMinter,
+        isCurrentUserAuthorizedWipMinter: isAuthorizedWipMinter(activeAccount.address),
+        wipAuthorizedMinters: WIP_AUTHORIZED_MINTERS,
 
         mintNFT,
         bulkMintNFTs,
@@ -1604,6 +1967,14 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         bridgeNFT,
         clearBridgeHistory,
         batchUpdateRoyalties,
+
+        // Auto-Sync for Work In Progress - WIP & Logo Collections
+        isAutoSyncing,
+        autoSyncEnabled,
+        toggleAutoSync,
+        lastSyncTimestamp,
+        syncWipCollections,
+        wipTotalCount,
 
         totalPortfolioValueUsd,
         totalRoyaltyEarnedUsd,

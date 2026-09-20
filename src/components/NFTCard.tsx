@@ -110,6 +110,16 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
                   {formatUsd(nft.price * chainConfig.usdPrice)}
                 </div>
               </div>
+            ) : isWip ? (
+              <div>
+                <div className="text-xs font-bold text-cyan-300 flex items-center gap-1 mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                  Live Mint
+                </div>
+                <div className="text-[10px] text-zinc-400 font-mono">
+                  {isOwner ? 'In Your Wallet' : 'Open for Offers'}
+                </div>
+              </div>
             ) : (
               <div className="text-xs font-semibold text-zinc-400 mt-1">
                 {isOwner ? 'In Your Wallet' : 'Not Listed'}
@@ -129,6 +139,10 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
           ) : isOwner ? (
             <span className="px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300 border border-zinc-700 text-[11px] font-bold">
               Manage
+            </span>
+          ) : isWip ? (
+            <span className="px-2.5 py-1 rounded-lg bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[11px] font-bold flex items-center gap-1 group-hover:bg-cyan-500/25 transition-colors">
+              Offer / View
             </span>
           ) : (
             <span className="px-2.5 py-1 rounded-lg bg-zinc-800/60 text-zinc-400 text-[11px] font-medium flex items-center gap-1">

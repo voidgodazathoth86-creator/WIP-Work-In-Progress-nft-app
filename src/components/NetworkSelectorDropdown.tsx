@@ -23,7 +23,7 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
   onSelectChain,
   showBalance = true,
 }) => {
-  const { activeChain, switchChain, allChains, activeAccount, gasData } = useWeb3();
+  const { activeChain, switchChain, allChains, activeAccount, gasData, networkMode, toggleNetworkMode, setNetworkMode } = useWeb3();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -85,20 +85,52 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
         >
           <span className="text-sm">{currentConfig.icon}</span>
           <span className="font-semibold">{currentConfig.shortName}</span>
+          <span className={`text-[9px] px-1 py-0.2 rounded font-mono font-semibold ${
+            networkMode === 'mainnet' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+          }`}>
+            {networkMode === 'mainnet' ? 'Main' : 'Test'}
+          </span>
           <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
         </button>
 
         {isOpen && (
           <div 
-            className="absolute right-0 mt-1.5 w-60 p-1.5 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
+            className="absolute right-0 mt-1.5 w-68 p-2 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
             role="listbox"
           >
-            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800/80 mb-1">
-              Select Network to Mint To
+            {/* Mode Switcher Header */}
+            <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-zinc-800">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Network Tier</span>
+              <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setNetworkMode('mainnet')}
+                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                    networkMode === 'mainnet'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Mainnet
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNetworkMode('testnet')}
+                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                    networkMode === 'testnet'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Testnet
+                </button>
+              </div>
             </div>
+
             <div className="space-y-1">
               {allChains.map((chain) => {
                 const isSelected = chain.id === currentChainId;
+                const networkLabel = networkMode === 'mainnet' ? chain.mainnetName : chain.testnetName;
                 return (
                   <button
                     key={chain.id}
@@ -116,13 +148,20 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
                     <div className="flex items-center gap-2">
                       <span className="text-base">{chain.icon}</span>
                       <div className="text-left">
-                        <div className="font-medium">{chain.name}</div>
-                        <div className="text-[10px] text-zinc-500 font-mono">
-                          {getChainBalance(chain.id as BlockchainNetwork)} {chain.symbol}
+                        <div className="font-medium flex items-center gap-1.5">
+                          <span>{chain.name}</span>
+                          <span className={`text-[9px] px-1 rounded font-mono ${
+                            networkMode === 'mainnet' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+                          }`}>
+                            {networkMode === 'mainnet' ? 'Main' : 'Test'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-zinc-500 font-mono truncate max-w-[150px]">
+                          {networkLabel}
                         </div>
                       </div>
                     </div>
-                    {isSelected && <Check className="w-4 h-4 text-cyan-400" />}
+                    {isSelected && <Check className="w-4 h-4 text-cyan-400 flex-shrink-0" />}
                   </button>
                 );
               })}
@@ -149,23 +188,56 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
             <span className="text-sm">{currentConfig.icon}</span>
             <span className="text-zinc-400 font-medium text-[11px] hidden sm:inline">Minting on:</span>
             <span className="text-cyan-400 font-bold">{currentConfig.name}</span>
+            <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-semibold ${
+              networkMode === 'mainnet' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+            }`}>
+              {networkMode === 'mainnet' ? 'Mainnet' : 'Testnet'}
+            </span>
           </div>
           <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 group-hover:text-cyan-400 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
         </button>
 
         {isOpen && (
           <div 
-            className="absolute right-0 mt-2 w-72 p-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
+            className="absolute right-0 mt-2 w-80 p-2.5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
             role="listbox"
           >
-            <div className="px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-zinc-400 flex items-center justify-between border-b border-zinc-800/80 mb-1.5">
-              <span>Target Minting Network</span>
-              <span className="text-cyan-400 font-mono text-[9px]">{allChains.length} Chains</span>
+            {/* Mode Toggle Header */}
+            <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-400 flex items-center justify-between border-b border-zinc-800/80 mb-2">
+              <span>Target Network Tier</span>
+              <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setNetworkMode('mainnet')}
+                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                    networkMode === 'mainnet'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Mainnets
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNetworkMode('testnet')}
+                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                    networkMode === 'testnet'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Testnets
+                </button>
+              </div>
             </div>
+
             <div className="space-y-1">
               {allChains.map((chain) => {
                 const isSelected = chain.id === currentChainId;
                 const bal = getChainBalance(chain.id as BlockchainNetwork);
+                const activeNetworkName = networkMode === 'mainnet' ? chain.mainnetName : chain.testnetName;
+                const chainIdDisplay = networkMode === 'mainnet' ? chain.mainnetChainId : chain.chainId;
+
                 return (
                   <button
                     key={chain.id}
@@ -185,12 +257,14 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
                       <div className="text-left">
                         <div className="font-semibold text-zinc-200 flex items-center gap-1.5">
                           {chain.name}
-                          {chain.id === 'polygon' && (
-                            <span className="text-[9px] px-1 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">Live</span>
-                          )}
+                          <span className={`text-[9px] px-1 py-0.2 rounded font-mono ${
+                            networkMode === 'mainnet' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                          }`}>
+                            {networkMode === 'mainnet' ? 'Mainnet' : 'Testnet'}
+                          </span>
                         </div>
                         <div className="text-[10px] text-zinc-400 font-mono">
-                          Balance: {bal} {chain.symbol}
+                          {activeNetworkName} (ID: {chainIdDisplay})
                         </div>
                       </div>
                     </div>
@@ -220,9 +294,13 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
             <Globe className="w-3.5 h-3.5 text-cyan-400" />
             {label}
           </span>
-          <span className="text-[10px] text-zinc-500 font-mono">
-            {currentConfig.testnetName || 'EVM'}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-semibold ${
+              networkMode === 'mainnet' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+            }`}>
+              {networkMode === 'mainnet' ? currentConfig.mainnetName : currentConfig.testnetName}
+            </span>
+          </div>
         </label>
       )}
 
@@ -242,11 +320,13 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 text-zinc-400 border border-zinc-700/50">
                 {currentConfig.symbol}
               </span>
-              {currentConfig.id === 'polygon' && (
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  Active
-                </span>
-              )}
+              <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
+                networkMode === 'mainnet'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+              }`}>
+                {networkMode === 'mainnet' ? 'Mainnet' : 'Testnet'}
+              </span>
             </div>
           </div>
 
@@ -262,18 +342,51 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
 
         {isOpen && (
           <div 
-            className="absolute left-0 right-0 mt-1.5 p-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 max-h-72 overflow-y-auto"
+            className="absolute left-0 right-0 mt-1.5 p-2.5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 max-h-80 overflow-y-auto"
             role="listbox"
           >
-            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 flex items-center justify-between border-b border-zinc-800/80 mb-1.5">
-              <span>Select Destination Blockchain</span>
-              <span className="text-zinc-500 text-[9px]">Tap to Switch</span>
+            {/* Mode switch tabs in form dropdown */}
+            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 flex items-center justify-between border-b border-zinc-800/80 mb-2">
+              <span>Select Network</span>
+              <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[10px]">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setNetworkMode('mainnet');
+                  }}
+                  className={`px-2.5 py-0.5 rounded font-semibold transition-all ${
+                    networkMode === 'mainnet'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Mainnets
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setNetworkMode('testnet');
+                  }}
+                  className={`px-2.5 py-0.5 rounded font-semibold transition-all ${
+                    networkMode === 'testnet'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Testnets
+                </button>
+              </div>
             </div>
 
             <div className="space-y-1">
               {allChains.map((chain) => {
                 const isSelected = chain.id === currentChainId;
                 const bal = getChainBalance(chain.id as BlockchainNetwork);
+                const activeNetworkName = networkMode === 'mainnet' ? chain.mainnetName : chain.testnetName;
+                const activeChainId = networkMode === 'mainnet' ? chain.mainnetChainId : chain.chainId;
+
                 return (
                   <button
                     key={chain.id}
@@ -298,16 +411,16 @@ export const NetworkSelectorDropdown: React.FC<NetworkSelectorDropdownProps> = (
                           <span className="text-[10px] font-mono text-zinc-400 font-normal">
                             ({chain.symbol})
                           </span>
-                          {chain.id === 'polygon' && (
-                            <span className="text-[9px] px-1 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">
-                              Live
-                            </span>
-                          )}
+                          <span className={`text-[9px] px-1 py-0.2 rounded font-mono ${
+                            networkMode === 'mainnet' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                          }`}>
+                            {networkMode === 'mainnet' ? 'Mainnet' : 'Testnet'}
+                          </span>
                         </div>
                         <div className="text-[10px] text-zinc-400 flex items-center gap-2 font-mono">
-                          <span>{chain.testnetName || 'Mainnet'}</span>
+                          <span>{activeNetworkName}</span>
                           <span>•</span>
-                          <span>Block: {chain.avgBlockTime}</span>
+                          <span>Chain ID: {activeChainId}</span>
                         </div>
                       </div>
                     </div>

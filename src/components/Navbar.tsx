@@ -42,7 +42,10 @@ export const Navbar: React.FC<NavbarProps> = ({
     gasData, 
     isConnected, 
     activeAccount, 
-    activeBalance 
+    activeBalance,
+    networkMode,
+    setNetworkMode,
+    toggleNetworkMode
   } = useWeb3();
 
   const [isNetworkDropdownOpen, setIsNetworkDropdownOpen] = useState(false);
@@ -213,48 +216,101 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 onClick={() => setIsNetworkDropdownOpen(!isNetworkDropdownOpen)}
                 id="network-switcher-btn"
-                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-semibold text-zinc-200 transition-colors"
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-semibold text-zinc-200 transition-colors cursor-pointer"
               >
                 <span className="text-sm">{currentChainConfig.icon}</span>
                 <span className="hidden sm:inline">{currentChainConfig.shortName}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+                <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                  networkMode === 'mainnet'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                }`}>
+                  {networkMode === 'mainnet' ? 'Mainnet' : 'Testnet'}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform duration-150 ${isNetworkDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
 
               {isNetworkDropdownOpen && (
                 <div 
-                  className="absolute right-0 mt-2 w-56 p-1.5 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50"
+                  className="absolute right-0 mt-2 w-64 p-2 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
                   onMouseLeave={() => setIsNetworkDropdownOpen(false)}
                 >
-                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                    Switch Network
-                  </div>
-                  <div className="space-y-1">
-                    {allChains.map((chain) => (
+                  {/* Tier Toggle Switch */}
+                  <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-zinc-800">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Network Tier</span>
+                    <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[10px]">
                       <button
-                        key={chain.id}
-                        id={`switch-chain-${chain.id}`}
-                        onClick={() => {
-                          switchChain(chain.id as BlockchainNetwork);
-                          setIsNetworkDropdownOpen(false);
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNetworkMode('mainnet');
                         }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
-                          activeChain === chain.id
-                            ? 'bg-zinc-800 text-cyan-400 font-bold border border-zinc-700'
-                            : 'text-zinc-300 hover:bg-zinc-800/60 hover:text-white'
+                        className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                          networkMode === 'mainnet'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'text-zinc-400 hover:text-zinc-200'
                         }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="text-base">{chain.icon}</span>
-                          <div className="text-left">
-                            <div>{chain.name}</div>
-                            <div className="text-[10px] text-zinc-500 font-mono">${chain.usdPrice}</div>
-                          </div>
-                        </div>
-                        {activeChain === chain.id && (
-                          <CheckCircle2 className="w-4 h-4 text-cyan-400" />
-                        )}
+                        Mainnet
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNetworkMode('testnet');
+                        }}
+                        className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                          networkMode === 'testnet'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        Testnet
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    {allChains.map((chain) => {
+                      const networkName = networkMode === 'mainnet' ? chain.mainnetName : chain.testnetName;
+                      return (
+                        <button
+                          key={chain.id}
+                          id={`switch-chain-${chain.id}`}
+                          onClick={() => {
+                            switchChain(chain.id as BlockchainNetwork);
+                            setIsNetworkDropdownOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                            activeChain === chain.id
+                              ? 'bg-zinc-800 text-cyan-400 font-bold border border-zinc-700'
+                              : 'text-zinc-300 hover:bg-zinc-800/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{chain.icon}</span>
+                            <div className="text-left">
+                              <div className="flex items-center gap-1.5">
+                                <span>{chain.name}</span>
+                                <span className={`text-[9px] px-1 rounded font-mono ${
+                                  networkMode === 'mainnet' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+                                }`}>
+                                  {networkMode === 'mainnet' ? 'Main' : 'Test'}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-zinc-500 font-mono truncate max-w-[140px]">
+                                {networkName}
+                              </div>
+                            </div>
+                          </div>
+                          {activeChain === chain.id ? (
+                            <CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+                          ) : (
+                            <span className="text-[10px] text-zinc-500 font-mono">${chain.usdPrice}</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}

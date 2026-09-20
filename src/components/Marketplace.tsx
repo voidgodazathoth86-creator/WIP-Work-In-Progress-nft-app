@@ -23,12 +23,17 @@ import {
   ArrowUp,
   Zap,
   CheckCircle2,
-  ArrowUpRight
+  ArrowUpRight,
+  Copy,
+  Check,
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import { SUPPORTED_CHAINS } from '../data/chains';
 import { formatUsd } from '../services/gasService';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 import { BatchRoyaltyManagerModal } from './BatchRoyaltyManagerModal';
+import { WIP_COLLECTION, WIP_LOGO_COLLECTION } from '../config/wipCollection';
 
 interface MarketplaceProps {
   onSelectNFT: (nft: NFT) => void;
@@ -36,10 +41,23 @@ interface MarketplaceProps {
 }
 
 export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMintStudio }) => {
-  const { nfts, activeChain, buyNFT } = useWeb3();
+  const { 
+    nfts, 
+    collections, 
+    activeChain, 
+    buyNFT,
+    isAutoSyncing,
+    autoSyncEnabled,
+    toggleAutoSync,
+    lastSyncTimestamp,
+    syncWipCollections,
+    wipTotalCount
+  } = useWeb3();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedChainFilter, setSelectedChainFilter] = useState<string>('all');
+  const [selectedCollectionFilter, setSelectedCollectionFilter] = useState<string>('all');
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'recent' | 'price_asc' | 'price_desc' | 'royalty_desc'>('recent');
   const [onlyListed, setOnlyListed] = useState<boolean>(true);
@@ -49,6 +67,15 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
   const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
   const [isBatchRoyaltyModalOpen, setIsBatchRoyaltyModalOpen] = useState<boolean>(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
+
+  const handleManualSync = async () => {
+    const res = await syncWipCollections(false);
+    if (res.success) {
+      setSyncToast(`Auto-sync complete: ${res.totalWipCount} Work In Progress & Logo items are active and visible.`);
+      setTimeout(() => setSyncToast(null), 4000);
+    }
+  };
 
   // Auto-dismiss success notification
   useEffect(() => {
@@ -81,10 +108,19 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleCopyAddress = (e: React.MouseEvent, addr: string) => {
+    e.stopPropagation();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(addr);
+      setCopiedAddress(addr);
+      setTimeout(() => setCopiedAddress(null), 2000);
+    }
+  };
+
   // Filtered & Sorted NFTs
   const filteredNFTs = useMemo(() => {
     return nfts.filter((nft) => {
-      // Search query - Real-time filtering by Name, Creator (name or address), Collection, and Token ID
+      // Search query - Real-time filtering by Name, Creator, Collection, Token ID, and Contract Address
       if (searchQuery.trim()) {
         const query = searchQuery.trim().toLowerCase();
         // Remove leading '#' if user searched e.g. "#1001" or "#1"
@@ -95,8 +131,9 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
         const matchesCreatorName = (nft.creatorName || '').toLowerCase().includes(query);
         const matchesCreatorAddress = (nft.creatorAddress || '').toLowerCase().includes(query);
         const matchesTokenId = (nft.tokenId || '').toLowerCase().includes(cleanQuery) || (nft.tokenId || '').toLowerCase().includes(query);
+        const matchesContract = (nft.contractAddress || '').toLowerCase().includes(query);
 
-        if (!matchesName && !matchesCol && !matchesCreatorName && !matchesCreatorAddress && !matchesTokenId) {
+        if (!matchesName && !matchesCol && !matchesCreatorName && !matchesCreatorAddress && !matchesTokenId && !matchesContract) {
           return false;
         }
       }
@@ -106,8 +143,29 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
         return false;
       }
 
-      // Listed filter
-      if (onlyListed && !nft.isListed) {
+      // Collection filter
+      if (selectedCollectionFilter !== 'all') {
+        const matchesId = nft.collectionId === selectedCollectionFilter;
+        const matchesContract = nft.contractAddress && (
+          nft.contractAddress.toLowerCase() === selectedCollectionFilter.toLowerCase() ||
+          (selectedCollectionFilter === 'col-wip-polygon' && nft.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()) ||
+          (selectedCollectionFilter === 'col-wip-logo-polygon' && nft.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase())
+        );
+        if (!matchesId && !matchesContract) {
+          return false;
+        }
+      }
+
+      // Listed filter (WIP & Logo collection NFTs are ALWAYS visible in the marketplace)
+      const isWipOrLogoNFT = 
+        nft.collectionId === 'col-wip-polygon' ||
+        nft.collectionId === 'col-wip-logo-polygon' ||
+        nft.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+        nft.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
+        (nft.collectionName && nft.collectionName.toLowerCase().includes('work in progress')) ||
+        (nft.collectionName && nft.collectionName.toLowerCase().includes('wip logo'));
+
+      if (onlyListed && !nft.isListed && !isWipOrLogoNFT) {
         return false;
       }
 
@@ -132,7 +190,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
       }
       return (b.createdAt || 0) - (a.createdAt || 0);
     });
-  }, [nfts, searchQuery, selectedChainFilter, onlyListed, minPrice, maxPrice, sortBy]);
+  }, [nfts, searchQuery, selectedChainFilter, selectedCollectionFilter, onlyListed, minPrice, maxPrice, sortBy]);
 
   // Infinite Scroll & Intersection Observer Hook
   const {
@@ -248,6 +306,321 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
           </div>
         </div>
       </div>
+
+      {/* Featured Official Collections on Polygon Showcase */}
+      <div className="space-y-3" id="marketplace-official-collections-section">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+            <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-1.5 uppercase tracking-wider">
+              <span>Verified Polygon Smart Contract Collections</span>
+              <ShieldCheck className="w-4 h-4 text-cyan-400" />
+            </h2>
+          </div>
+          <span className="text-[11px] text-zinc-400">
+            Enforced 10% secondary royalties • 0% marketplace protocol fee
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Work In Progress - WIP Collection Card */}
+          <div 
+            onClick={() => {
+              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-polygon' ? 'all' : 'col-wip-polygon');
+              if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
+                setSelectedChainFilter('all');
+              }
+            }}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
+              selectedCollectionFilter === 'col-wip-polygon'
+                ? 'bg-cyan-950/40 border-cyan-500/60 ring-1 ring-cyan-500/40 shadow-lg shadow-cyan-950/40'
+                : 'bg-zinc-900/80 border-zinc-800 hover:border-cyan-500/40 hover:bg-zinc-900'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[10px] font-bold uppercase tracking-wider">
+                    Polygon (137)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px] font-bold">
+                    10% Royalty
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-400">Symbol: WIP</span>
+                </div>
+                <h3 className="text-base font-bold text-white group-hover:text-cyan-300 transition-colors flex items-center gap-1.5">
+                  Work In Progress - WIP Collection
+                  <CheckCircle2 className="w-4 h-4 text-cyan-400 inline shrink-0" />
+                </h3>
+                <p className="text-xs text-zinc-400 line-clamp-2">
+                  Original generative iterations and genesis blueprints on Polygon smart contract with automated secondary royalties.
+                </p>
+              </div>
+
+              <div className="text-right shrink-0">
+                <div className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">Floor Price</div>
+                <div className="text-lg font-black text-white font-mono">25.0 MATIC</div>
+                <div className="text-[10px] text-cyan-400 font-mono">
+                  {nfts.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length} in Marketplace
+                </div>
+              </div>
+            </div>
+
+            {/* Contract Address Bar & Quick Actions */}
+            <div className="mt-4 pt-3 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-400">
+                <span className="text-zinc-500">Contract:</span>
+                <span className="text-zinc-200 select-all font-semibold">
+                  {WIP_COLLECTION.contractAddress.slice(0, 10)}...{WIP_COLLECTION.contractAddress.slice(-8)}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => handleCopyAddress(e, WIP_COLLECTION.contractAddress)}
+                  title="Copy full contract address"
+                  className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                >
+                  {copiedAddress === WIP_COLLECTION.contractAddress ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                </button>
+                <a
+                  href={`https://polygonscan.com/address/${WIP_COLLECTION.contractAddress}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-400 transition-colors"
+                  title="View on PolygonScan"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenMintStudio();
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[11px] font-bold transition-all flex items-center gap-1"
+                >
+                  <PlusCircle className="w-3 h-3" />
+                  Mint to WIP
+                </button>
+                <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  selectedCollectionFilter === 'col-wip-polygon'
+                    ? 'bg-cyan-500 text-black shadow-sm'
+                    : 'bg-zinc-800 text-zinc-300 hover:text-white'
+                }`}>
+                  {selectedCollectionFilter === 'col-wip-polygon' ? 'Filtered Active' : 'Filter Collection'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* WIP Logo Collection Card */}
+          <div 
+            onClick={() => {
+              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-logo-polygon' ? 'all' : 'col-wip-logo-polygon');
+              if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
+                setSelectedChainFilter('all');
+              }
+            }}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
+              selectedCollectionFilter === 'col-wip-logo-polygon'
+                ? 'bg-purple-950/40 border-purple-500/60 ring-1 ring-purple-500/40 shadow-lg shadow-purple-950/40'
+                : 'bg-zinc-900/80 border-zinc-800 hover:border-purple-500/40 hover:bg-zinc-900'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[10px] font-bold uppercase tracking-wider">
+                    Polygon (137)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px] font-bold">
+                    10% Royalty
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-400">Symbol: WIPLOGO</span>
+                </div>
+                <h3 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
+                  WIP Logo Collection
+                  <CheckCircle2 className="w-4 h-4 text-purple-400 inline shrink-0" />
+                </h3>
+                <p className="text-xs text-zinc-400 line-clamp-2">
+                  Official insignia, genesis monograms, and emblem prints from the WIP Logo Polygon smart contract.
+                </p>
+              </div>
+
+              <div className="text-right shrink-0">
+                <div className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">Floor Price</div>
+                <div className="text-lg font-black text-white font-mono">50.0 MATIC</div>
+                <div className="text-[10px] text-purple-400 font-mono">
+                  {nfts.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length} in Marketplace
+                </div>
+              </div>
+            </div>
+
+            {/* Contract Address Bar & Quick Actions */}
+            <div className="mt-4 pt-3 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-400">
+                <span className="text-zinc-500">Contract:</span>
+                <span className="text-zinc-200 select-all font-semibold">
+                  {WIP_LOGO_COLLECTION.contractAddress.slice(0, 10)}...{WIP_LOGO_COLLECTION.contractAddress.slice(-8)}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => handleCopyAddress(e, WIP_LOGO_COLLECTION.contractAddress)}
+                  title="Copy full contract address"
+                  className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                >
+                  {copiedAddress === WIP_LOGO_COLLECTION.contractAddress ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                </button>
+                <a
+                  href={`https://polygonscan.com/address/${WIP_LOGO_COLLECTION.contractAddress}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-purple-400 transition-colors"
+                  title="View on PolygonScan"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenMintStudio();
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition-all flex items-center gap-1"
+                >
+                  <PlusCircle className="w-3 h-3" />
+                  Mint to Logo
+                </button>
+                <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  selectedCollectionFilter === 'col-wip-logo-polygon'
+                    ? 'bg-purple-500 text-white shadow-sm'
+                    : 'bg-zinc-800 text-zinc-300 hover:text-white'
+                }`}>
+                  {selectedCollectionFilter === 'col-wip-logo-polygon' ? 'Filtered Active' : 'Filter Collection'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Auto-Sync Live Status Bar for WIP & Logo Collections */}
+      <div 
+        id="wip-auto-sync-status-bar"
+        className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-zinc-900/80 to-purple-950/40 border border-cyan-500/20 backdrop-blur-md flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg"
+      >
+        <div className="flex items-center gap-3">
+          <div className="relative flex items-center justify-center w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/30 shrink-0">
+            <span className={`w-2.5 h-2.5 rounded-full ${autoSyncEnabled ? 'bg-emerald-400' : 'bg-zinc-500'} ${isAutoSyncing ? 'animate-ping' : ''}`} />
+            {autoSyncEnabled && <span className="absolute w-2 h-2 rounded-full bg-emerald-400" />}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-zinc-100 uppercase tracking-wider">
+                WIP Auto-Sync Engine
+              </span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                {autoSyncEnabled ? 'LIVE AUTO-SYNC' : 'PAUSED'}
+              </span>
+              {lastSyncTimestamp && (
+                <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">
+                  Updated {new Date(lastSyncTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-400">
+              New mints to <span className="text-cyan-300 font-semibold">Work In Progress - WIP</span> and <span className="text-purple-300 font-semibold">WIP Logo</span> are automatically added and always visible in the marketplace.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center flex-wrap gap-2 w-full md:w-auto justify-between md:justify-end">
+          {/* Quick Collection Count Badges */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-polygon' ? 'all' : 'col-wip-polygon')}
+              className={`px-2 py-1 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 cursor-pointer ${
+                selectedCollectionFilter === 'col-wip-polygon'
+                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-200 shadow-sm'
+                  : 'bg-zinc-950/70 border-zinc-800 text-zinc-300 hover:border-cyan-500/40'
+              }`}
+              title="Filter to Work In Progress - WIP"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+              <span>WIP:</span>
+              <span className="font-mono text-cyan-300 font-bold">{nfts.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length}</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-logo-polygon' ? 'all' : 'col-wip-logo-polygon')}
+              className={`px-2 py-1 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 cursor-pointer ${
+                selectedCollectionFilter === 'col-wip-logo-polygon'
+                  ? 'bg-purple-500/20 border-purple-500 text-purple-200 shadow-sm'
+                  : 'bg-zinc-950/70 border-zinc-800 text-zinc-300 hover:border-purple-500/40'
+              }`}
+              title="Filter to WIP Logo Collection"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+              <span>Logo:</span>
+              <span className="font-mono text-purple-300 font-bold">{nfts.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length}</span>
+            </button>
+          </div>
+
+          {/* Sync Now Button */}
+          <button
+            id="wip-manual-sync-btn"
+            onClick={handleManualSync}
+            disabled={isAutoSyncing}
+            className="px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+            title="Scan blockchain & database for new mints now"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin text-cyan-200' : ''}`} />
+            <span>{isAutoSyncing ? 'Syncing...' : 'Sync Now'}</span>
+          </button>
+
+          {/* Auto-Sync Toggle */}
+          <button
+            id="wip-toggle-autosync-btn"
+            onClick={toggleAutoSync}
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              autoSyncEnabled
+                ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40'
+                : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title="Toggle automatic background sync"
+          >
+            {autoSyncEnabled ? 'Auto-Sync: ON' : 'Auto-Sync: OFF'}
+          </button>
+        </div>
+      </div>
+
+      {/* Sync Toast Feedback */}
+      {syncToast && (
+        <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs font-medium flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{syncToast}</span>
+          </div>
+          <button onClick={() => setSyncToast(null)} className="text-emerald-400 hover:text-emerald-200 p-1">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Filter & Search Bar */}
       <div className="p-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-4" id="marketplace-filter-section">
@@ -388,6 +761,166 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
             );
           })}
         </div>
+
+        {/* Collection Filters Pill Row */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none pt-1 border-t border-zinc-800/60">
+          <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider shrink-0 flex items-center gap-1 pl-1">
+            <Sparkles className="w-3 h-3 text-cyan-400" />
+            Collection:
+          </span>
+
+          <button
+            id="marketplace-filter-col-all"
+            onClick={() => setSelectedCollectionFilter('all')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              selectedCollectionFilter === 'all'
+                ? 'bg-zinc-200 text-zinc-950 shadow-sm'
+                : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            All Collections
+          </button>
+
+          {/* Official WIP Collection Pill */}
+          <button
+            id="marketplace-filter-col-wip"
+            onClick={() => {
+              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-polygon' ? 'all' : 'col-wip-polygon');
+              if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
+                setSelectedChainFilter('all');
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              selectedCollectionFilter === 'col-wip-polygon'
+                ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/60 shadow-sm'
+                : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-cyan-500/40 hover:text-zinc-200'
+            }`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            <span>Work In Progress - WIP</span>
+            <span className="text-[10px] font-mono text-cyan-400">
+              ({nfts.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length})
+            </span>
+          </button>
+
+          {/* Official WIP Logo Collection Pill */}
+          <button
+            id="marketplace-filter-col-wip-logo"
+            onClick={() => {
+              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-logo-polygon' ? 'all' : 'col-wip-logo-polygon');
+              if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
+                setSelectedChainFilter('all');
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              selectedCollectionFilter === 'col-wip-logo-polygon'
+                ? 'bg-purple-500/20 text-purple-200 border border-purple-500/60 shadow-sm'
+                : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-purple-500/40 hover:text-zinc-200'
+            }`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+            <span>WIP Logo Collection</span>
+            <span className="text-[10px] font-mono text-purple-400">
+              ({nfts.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length})
+            </span>
+          </button>
+
+          {/* Other Collections */}
+          {collections
+            .filter(c => c.id !== 'col-wip-polygon' && c.id !== 'col-wip-logo-polygon' && c.contractAddress !== WIP_COLLECTION.contractAddress && c.contractAddress !== WIP_LOGO_COLLECTION.contractAddress)
+            .map(col => {
+              const count = nfts.filter(n => n.collectionId === col.id || n.contractAddress?.toLowerCase() === col.contractAddress.toLowerCase()).length;
+              if (count === 0) return null;
+              const isSelected = selectedCollectionFilter === col.id;
+              return (
+                <button
+                  key={col.id}
+                  onClick={() => setSelectedCollectionFilter(isSelected ? 'all' : col.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                    isSelected
+                      ? 'bg-zinc-800 text-cyan-300 border border-cyan-500/50 shadow-sm'
+                      : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
+                  }`}
+                >
+                  <span>{col.name}</span>
+                  <span className="text-[10px] font-mono text-zinc-500">({count})</span>
+                </button>
+              );
+            })}
+        </div>
+
+        {/* Active Collection Filter Banner */}
+        {selectedCollectionFilter !== 'all' && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-cyan-500/40 rounded-xl text-xs shadow-md animate-in fade-in duration-150">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                <span className="font-bold text-white">
+                  {selectedCollectionFilter === 'col-wip-polygon'
+                    ? 'Work In Progress - WIP Collection'
+                    : selectedCollectionFilter === 'col-wip-logo-polygon'
+                    ? 'WIP Logo Collection'
+                    : collections.find(c => c.id === selectedCollectionFilter)?.name || 'Filtered Collection'}
+                </span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
+              </div>
+
+              <div className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 bg-zinc-900 px-2.5 py-1 rounded-lg border border-zinc-800">
+                <span className="text-zinc-500">Contract:</span>
+                <span className="text-zinc-200 font-semibold">
+                  {selectedCollectionFilter === 'col-wip-polygon'
+                    ? WIP_COLLECTION.contractAddress
+                    : selectedCollectionFilter === 'col-wip-logo-polygon'
+                    ? WIP_LOGO_COLLECTION.contractAddress
+                    : collections.find(c => c.id === selectedCollectionFilter)?.contractAddress || ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => handleCopyAddress(
+                    e,
+                    selectedCollectionFilter === 'col-wip-polygon'
+                      ? WIP_COLLECTION.contractAddress
+                      : selectedCollectionFilter === 'col-wip-logo-polygon'
+                      ? WIP_LOGO_COLLECTION.contractAddress
+                      : collections.find(c => c.id === selectedCollectionFilter)?.contractAddress || ''
+                  )}
+                  title="Copy Contract Address"
+                  className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+              </div>
+
+              <span className="text-purple-300 font-semibold bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20 text-[11px]">
+                10.0% Royalty Protected
+              </span>
+
+              <span className="text-cyan-400 font-mono text-[11px]">
+                {filteredNFTs.length} {filteredNFTs.length === 1 ? 'collectible' : 'collectibles'} shown
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenMintStudio}
+                className="px-3 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                Mint New Item
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCollectionFilter('all')}
+                className="px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold transition-all border border-zinc-700 flex items-center gap-1 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear Filter
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Active Search Filter Banner */}
         {searchQuery.trim() && (

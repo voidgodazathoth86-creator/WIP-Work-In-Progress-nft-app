@@ -9,6 +9,8 @@ export type BlockchainNetwork =
 
 export type TokenStandard = 'ERC-721' | 'ERC-1155' | 'SPL-NFT';
 
+export type NetworkMode = 'mainnet' | 'testnet';
+
 export interface ChainConfig {
   id: BlockchainNetwork;
   name: string;
@@ -20,10 +22,14 @@ export interface ChainConfig {
   badgeBg: string;
   badgeText: string;
   testnetName: string;
+  mainnetName: string;
   isTestnet: boolean;
   chainId: number | string;
+  mainnetChainId: number | string;
   rpcUrl: string;
+  mainnetRpcUrl: string;
   blockExplorer: string;
+  mainnetExplorer: string;
   avgBlockTime: string;
   faucetAmount: number;
   faucetSymbol: string;

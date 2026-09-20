@@ -11,6 +11,7 @@ import {
   Trash2, 
   Check, 
   Lock, 
+  Unlock,
   ExternalLink, 
   Flame, 
   FolderPlus,
@@ -44,6 +45,13 @@ import { BulkMintStudio } from './BulkMintStudio';
 import { BulkMetadataUploadModal, ParsedAssetItem } from './BulkMetadataUploadModal';
 import { processRawSpreadsheetData } from '../services/spreadsheetService';
 import { NetworkSelectorDropdown } from './NetworkSelectorDropdown';
+import { 
+  WIP_COLLECTION, 
+  WIP_LOGO_COLLECTION, 
+  COLLECTION_FACTORY_1000,
+  WIP_AUTHORIZED_MINTERS,
+  isAuthorizedWipMinter
+} from '../config/wipCollection';
 import confetti from 'canvas-confetti';
 
 interface MintStudioProps {
@@ -65,7 +73,10 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
     activeBalance,
     collections, 
     mintNFT, 
-    deployCollection 
+    deployCollection,
+    syncWipCollections,
+    allAccounts,
+    connectDemoAccount
   } = useWeb3();
 
   // Studio Mode: 'single' | 'deploy' | 'bulk'
@@ -78,14 +89,65 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
   const [generativeStyle, setGenerativeStyle] = useState<GenerativeStyle>('cyberpunk');
   const [generativeSeed, setGenerativeSeed] = useState(`CyberNFT-${Date.now()}`);
   const [uploadedImageUrl, setUploadedImageUrl] = useState('');
-  const [collectionId, setCollectionId] = useState('');
+  const [collectionId, setCollectionId] = useState('col-contract-1000');
+  const [copiedContractAddress, setCopiedContractAddress] = useState(false);
   const [tokenStandard, setTokenStandard] = useState<TokenStandard>('ERC-721');
-  const [royaltyPercentage, setRoyaltyPercentage] = useState<number>(7.5);
-  const [royaltyPayoutAddress, setRoyaltyPayoutAddress] = useState(activeAccount.address);
+  const [royaltyPercentage, setRoyaltyPercentage] = useState<number>(10.0);
+  const [royaltyPayoutAddress, setRoyaltyPayoutAddress] = useState(COLLECTION_FACTORY_1000.royaltyReceiver);
   const [isInstantList, setIsInstantList] = useState(false);
   const [listPrice, setListPrice] = useState<string>('0.5');
   const [hasUnlockable, setHasUnlockable] = useState(false);
   const [unlockableContent, setUnlockableContent] = useState('');
+
+  const selectedCol = collections.find(c => c.id === collectionId) ||
+    (collectionId === 'col-contract-1000' || collectionId === 'col-wip-1000' || collectionId === COLLECTION_FACTORY_1000.contractAddress ? collections.find(c => c.id === 'col-contract-1000' || c.contractAddress.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase()) : undefined) ||
+    (collectionId === 'col-wip-polygon' || collectionId === WIP_COLLECTION.contractAddress ? collections.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()) : undefined) ||
+    (collectionId === 'col-wip-logo-polygon' || collectionId === WIP_LOGO_COLLECTION.contractAddress ? collections.find(c => c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()) : undefined);
+
+  // WIP Lock & Access Control
+  const isSelectedWipOrLogo = 
+    collectionId === 'col-wip-polygon' || 
+    collectionId === 'col-wip-logo-polygon' ||
+    (selectedCol?.contractAddress ? (
+      selectedCol.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+      selectedCol.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()
+    ) : false) ||
+    (!!selectedCol?.name && selectedCol.name.toLowerCase().includes('work in progress') && !selectedCol.name.toLowerCase().includes('collection contract'));
+
+  const isUserAuthorizedForWip = isAuthorizedWipMinter(activeAccount?.address);
+  const isWipLockedForUser = isSelectedWipOrLogo && !isUserAuthorizedForWip;
+
+  const handleCollectionChange = (newColId: string) => {
+    setCollectionId(newColId);
+    if (newColId === 'col-contract-1000' || newColId === 'col-wip-1000' || newColId === COLLECTION_FACTORY_1000.contractAddress) {
+      setRoyaltyPercentage(10.0);
+      setRoyaltyPayoutAddress(COLLECTION_FACTORY_1000.royaltyReceiver);
+      setTokenStandard('ERC-721');
+    } else if (newColId === 'col-wip-polygon' || newColId === WIP_COLLECTION.contractAddress) {
+      setRoyaltyPercentage(WIP_COLLECTION.royaltyBps / 100);
+      setRoyaltyPayoutAddress(WIP_COLLECTION.royaltyReceiver);
+      setTokenStandard('ERC-721');
+    } else if (newColId === 'col-wip-logo-polygon' || newColId === WIP_LOGO_COLLECTION.contractAddress) {
+      setRoyaltyPercentage(WIP_LOGO_COLLECTION.royaltyBps / 100);
+      setRoyaltyPayoutAddress(WIP_LOGO_COLLECTION.royaltyReceiver);
+      setTokenStandard('ERC-721');
+    } else if (newColId) {
+      const col = collections.find(c => c.id === newColId);
+      if (col) {
+        if (col.royaltyPercentage) setRoyaltyPercentage(col.royaltyPercentage);
+        if (col.royaltyPayoutAddress) setRoyaltyPayoutAddress(col.royaltyPayoutAddress);
+        if (col.standard) setTokenStandard(col.standard);
+      }
+    }
+  };
+
+  const handleCopyContractAddress = (address: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(address);
+      setCopiedContractAddress(true);
+      setTimeout(() => setCopiedContractAddress(false), 2000);
+    }
+  };
   
   // Traits builder
   const [traits, setTraits] = useState<NFTTrait[]>([
@@ -293,6 +355,13 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
       return;
     }
 
+    if (isWipLockedForUser) {
+      setErrorMessage(
+        'Access Restricted: Work In Progress - WIP collection & WIP logo collection are locked. Only 0xBaB06d358B181eB16e3189525BCc0bc4761a3762 & 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0 can mint to these collections. Please switch to an authorized wallet or choose Collection Contract (1/1000) or Independent 1/1.'
+      );
+      return;
+    }
+
     setErrorMessage(null);
     setExecutionType('mint');
     setIsExecuting(true);
@@ -306,16 +375,17 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
       setExecutionStep(3); // Mempool Broadcast & Gas
 
       const priceVal = isInstantList && listPrice ? parseFloat(listPrice) : undefined;
-      const selectedCol = collections.find(c => c.id === collectionId);
+      const targetChainToMint = selectedCol ? selectedCol.chainId : activeChain;
 
       const result = await mintNFT({
         name,
         description: description || `Original ${currentChainConfig.standard} digital asset minted on ${currentChainConfig.name}.`,
         image: previewImage,
-        chainId: activeChain,
+        chainId: targetChainToMint,
         standard: tokenStandard,
-        collectionId: collectionId || undefined,
+        collectionId: (collectionId === 'col-wip-1000' ? 'col-contract-1000' : collectionId) || undefined,
         collectionName: selectedCol?.name,
+        contractAddress: selectedCol?.contractAddress,
         royaltyPercentage,
         royaltyPayoutAddress: royaltyPayoutAddress || activeAccount.address,
         price: priceVal,
@@ -331,6 +401,9 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
 
       setExecutionStep(4); // Confirmed!
       setMintedResult(result.nft);
+
+      // Trigger instant background auto-sync so newly minted NFT appears in marketplace immediately
+      syncWipCollections(false).catch(() => {});
 
       confetti({
         particleCount: 80,
@@ -748,35 +821,343 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                 />
               </div>
 
-              {/* Collection Attachment */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-300 flex items-center justify-between">
-                  <span>Attach to Smart Contract Collection (Optional)</span>
-                  <span className="text-[11px] font-normal text-zinc-400">
-                    {collections.filter(c => c.chainId === activeChain).length} on {currentChainConfig.name}
-                  </span>
-                </label>
-                <select
-                  value={collectionId}
-                  onChange={(e) => setCollectionId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-semibold text-zinc-200 focus:outline-none focus:border-cyan-500/50"
-                >
-                  <option value="">Independent Single 1/1 Edition (Direct Smart Contract)</option>
-                  {collections.filter(c => c.chainId === activeChain).map(col => (
-                    <option key={col.id} value={col.id}>
-                      [{currentChainConfig.shortName}] {col.name} ({col.symbol}) • {col.standard} • {col.currentSupply}/{col.maxSupply}
-                    </option>
-                  ))}
-                  {collections.filter(c => c.chainId !== activeChain).length > 0 && (
-                    <optgroup label="Collections on Other Networks">
-                      {collections.filter(c => c.chainId !== activeChain).map(col => (
-                        <option key={col.id} value={col.id}>
-                          [{col.chainId.toUpperCase()}] {col.name} ({col.symbol}) • {col.standard}
-                        </option>
-                      ))}
-                    </optgroup>
+              {/* Choose Collection to Mint To */}
+              <div className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <label htmlFor="mint-collection-dropdown" className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-cyan-400" />
+                      <span>Choose Collection to Mint To *</span>
+                    </label>
+                    <p className="text-[11px] text-zinc-400">
+                      Select target smart contract collection or mint an independent 1/1 edition
+                    </p>
+                  </div>
+                  {collectionId && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
+                      {selectedCol?.standard || 'ERC-721'} Connected
+                    </span>
                   )}
-                </select>
+                </div>
+
+                {/* Quick Selection Shortcuts */}
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    id="chip-collection-contract-1000"
+                    onClick={() => handleCollectionChange('col-contract-1000')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      collectionId === 'col-contract-1000' || collectionId === 'col-wip-1000'
+                        ? 'bg-cyan-500/20 border border-cyan-500/50 text-cyan-200 shadow-sm ring-1 ring-cyan-500/30'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Collection Contract (1/1000)</span>
+                    <span className="text-[10px] font-mono text-cyan-500/80">0x663D...</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="chip-wip-collection"
+                    onClick={() => handleCollectionChange('col-wip-polygon')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      collectionId === 'col-wip-polygon'
+                        ? 'bg-cyan-500/20 border border-cyan-500/50 text-cyan-200 shadow-sm ring-1 ring-cyan-500/30'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Work In Progress - WIP</span>
+                    {isUserAuthorizedForWip ? (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 flex items-center gap-0.5 font-bold">
+                        <Unlock className="w-2.5 h-2.5" />
+                        Authorized
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 flex items-center gap-0.5 font-bold">
+                        <Lock className="w-2.5 h-2.5" />
+                        Locked
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    id="chip-wip-logo"
+                    onClick={() => handleCollectionChange('col-wip-logo-polygon')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      collectionId === 'col-wip-logo-polygon'
+                        ? 'bg-purple-500/20 border border-purple-500/50 text-purple-200 shadow-sm ring-1 ring-purple-500/30'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                    <span>WIP Logo</span>
+                    {isUserAuthorizedForWip ? (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 flex items-center gap-0.5 font-bold">
+                        <Unlock className="w-2.5 h-2.5" />
+                        Authorized
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 flex items-center gap-0.5 font-bold">
+                        <Lock className="w-2.5 h-2.5" />
+                        Locked
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    id="chip-independent-1-1"
+                    onClick={() => handleCollectionChange('')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      collectionId === ''
+                        ? 'bg-zinc-800 border border-zinc-600 text-zinc-200 ring-1 ring-zinc-500/30'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span>Independent 1/1</span>
+                  </button>
+                </div>
+
+                {/* Primary Collection Dropdown */}
+                <div className="space-y-1">
+                  <select
+                    id="mint-collection-dropdown"
+                    value={collectionId === 'col-wip-1000' ? 'col-contract-1000' : collectionId}
+                    onChange={(e) => handleCollectionChange(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs font-semibold text-zinc-100 focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+                  >
+                    <optgroup label="⭐ Collection Factory (1/1000)">
+                      <option value="col-contract-1000">
+                        Collection Contract (1/1000) - Factory (0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37)
+                      </option>
+                    </optgroup>
+
+                    <optgroup label={`⭐ Official WIP Collections (${isUserAuthorizedForWip ? 'Unlocked for you' : '🔒 Locked to Authorized Creators'})`}>
+                      <option value="col-wip-polygon">
+                        {isUserAuthorizedForWip ? '🔓' : '🔒'} Work In Progress - WIP Collection (0xc2eaa64D...ef9) {isUserAuthorizedForWip ? '[Authorized]' : '[Locked: Creator Only]'}
+                      </option>
+                      <option value="col-wip-logo-polygon">
+                        {isUserAuthorizedForWip ? '🔓' : '🔒'} WIP Logo Collection (0x675fD85F...f46) {isUserAuthorizedForWip ? '[Authorized]' : '[Locked: Creator Only]'}
+                      </option>
+                    </optgroup>
+
+                    <optgroup label="📄 Standalone Token">
+                      <option value="">
+                        Independent Single 1/1 Edition (Direct Smart Contract)
+                      </option>
+                    </optgroup>
+
+                    {collections.filter(c => c.id !== 'col-wip-polygon' && c.id !== 'col-wip-logo-polygon' && c.id !== 'col-contract-1000' && c.id !== 'col-wip-1000' && c.contractAddress.toLowerCase() !== WIP_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== WIP_LOGO_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== COLLECTION_FACTORY_1000.contractAddress.toLowerCase()).length > 0 && (
+                      <optgroup label="🌐 Other Deployed Collections">
+                        {collections
+                          .filter(c => c.id !== 'col-wip-polygon' && c.id !== 'col-wip-logo-polygon' && c.id !== 'col-contract-1000' && c.id !== 'col-wip-1000' && c.contractAddress.toLowerCase() !== WIP_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== WIP_LOGO_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== COLLECTION_FACTORY_1000.contractAddress.toLowerCase())
+                          .map(col => (
+                            <option key={col.id} value={col.id}>
+                              [{col.chainId.toUpperCase()}] {col.name} ({col.symbol}) • {col.standard} • {col.contractAddress.slice(0, 8)}...
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+
+                {/* Selected Collection Verified Card */}
+                {selectedCol ? (
+                  <div className="p-3.5 rounded-xl bg-zinc-900/90 border border-zinc-800 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          {selectedCol.name}
+                          <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 inline" />
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                          {selectedCol.symbol}
+                        </span>
+                        {(collectionId === 'col-contract-1000' || collectionId === 'col-wip-1000' || collectionId === 'col-wip-polygon' || selectedCol.maxSupply === 1000) && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
+                            1/1000 Edition
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-zinc-400">Target Chain:</span>
+                        <span className="text-[10px] font-bold text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                          {selectedCol.chainId.toUpperCase()} (Chain ID: 137)
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-zinc-800/80 text-[11px]">
+                      <div className="flex items-center gap-1.5 font-mono text-zinc-300">
+                        <span className="text-zinc-500">Contract:</span>
+                        <span className="text-zinc-200 select-all font-semibold">
+                          {selectedCol.contractAddress}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyContractAddress(selectedCol.contractAddress)}
+                          title="Copy Contract Address"
+                          className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                        >
+                          {copiedContractAddress ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`https://polygonscan.com/address/${selectedCol.contractAddress}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 hover:underline"
+                        >
+                          PolygonScan <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-0.5">
+                      <span>Secondary Royalty: <strong className="text-purple-400">{selectedCol.royaltyPercentage}% EIP-2981</strong></span>
+                      <span className="text-emerald-400/90 font-medium">0% Marketplace Protocol Fee</span>
+                    </div>
+
+                    {(collectionId === 'col-contract-1000' || collectionId === 'col-wip-1000' || selectedCol?.contractAddress.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase()) && (
+                      <div className="pt-2.5 border-t border-cyan-500/20 flex flex-wrap items-center justify-between gap-2.5 text-xs bg-cyan-950/30 -mx-3.5 -mb-2.5 p-3 rounded-b-xl">
+                        <div className="text-[11px] text-cyan-300/90 flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span>
+                            <strong>Factory Contract:</strong> Creates new smart contracts for new collections (1/1000).
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          id="btn-deploy-1000-contract"
+                          onClick={() => {
+                            setContractMaxSupply(1000);
+                            setContractStandard('ERC-721');
+                            setStudioMode('deploy');
+                          }}
+                          className="px-3 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <FolderPlus className="w-3.5 h-3.5 text-cyan-400" />
+                          Create New 1/1000 Smart Contract
+                        </button>
+                      </div>
+                    )}
+
+                    {isSelectedWipOrLogo && (
+                      isWipLockedForUser ? (
+                        <div className="pt-3 border-t border-amber-500/30 flex flex-col gap-2.5 text-xs bg-amber-950/30 -mx-3.5 -mb-2.5 p-3.5 rounded-b-xl">
+                          <div className="flex items-start gap-2.5">
+                            <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                              <Lock className="w-4 h-4 text-amber-400" />
+                            </div>
+                            <div className="space-y-1 text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-amber-300">Access Restricted (Collection Locked)</span>
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-mono font-bold">
+                                  Whitelisted Only
+                                </span>
+                              </div>
+                              <p className="text-zinc-300 text-[11px] leading-relaxed">
+                                Work In Progress - WIP &amp; WIP Logo collections are locked to official creator wallets only:
+                              </p>
+                              <div className="space-y-1 font-mono text-[10px] text-amber-200/90 pt-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                                  <span>0xBaB06d358B181eB16e3189525BCc0bc4761a3762</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                                  <span>0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0</span>
+                                </div>
+                              </div>
+                              <p className="text-zinc-400 text-[10px] pt-1">
+                                Connected wallet (<span className="font-mono text-zinc-300">{activeAccount.address.slice(0, 6)}...{activeAccount.address.slice(-4)}</span>) is not permitted to mint to this collection.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-amber-500/20">
+                            <button
+                              type="button"
+                              onClick={() => handleCollectionChange('col-contract-1000')}
+                              className="px-2.5 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Sparkles className="w-3 h-3 text-cyan-400" />
+                              Switch to Collection Contract (1/1000)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCollectionChange('')}
+                              className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer"
+                            >
+                              Independent 1/1
+                            </button>
+                            {allAccounts.some(acc => isAuthorizedWipMinter(acc.address)) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const authAcc = allAccounts.find(acc => isAuthorizedWipMinter(acc.address));
+                                  if (authAcc) connectDemoAccount(authAcc);
+                                }}
+                                className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Unlock className="w-3 h-3 text-emerald-400" />
+                                Switch to Authorized Wallet (Demo)
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="pt-3 border-t border-emerald-500/30 flex items-center justify-between gap-2 text-xs bg-emerald-950/20 -mx-3.5 -mb-2.5 p-3 rounded-b-xl">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                              <Unlock className="w-3.5 h-3.5 text-emerald-400" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-emerald-300">Authorized Creator Wallet Verified</span>
+                              <span className="text-[10px] text-zinc-400 block">
+                                Wallet <span className="font-mono text-emerald-200">{activeAccount.address.slice(0, 8)}...{activeAccount.address.slice(-6)}</span> has unrestricted minting clearance.
+                              </span>
+                            </div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 font-mono text-[10px] font-bold border border-emerald-500/30">
+                            CLEARANCE GRANTED
+                          </span>
+                        </div>
+                      )
+                    )}
+
+                    {activeChain !== 'polygon' && (
+                      <div className="pt-2 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="text-[11px] text-amber-300/90 flex items-center gap-1">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                          Contract is on Polygon. Active network is {currentChainConfig.name}.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => switchChain('polygon')}
+                          className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          Switch Network to Polygon
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-[11px] text-zinc-400 flex items-center justify-between">
+                    <span>Direct Smart Contract Minting (Single 1/1 Master Token)</span>
+                    <span className="text-[10px] font-mono text-zinc-500">{activeChain.toUpperCase()}</span>
+                  </div>
+                )}
               </div>
 
               {/* Royalty Engine Configuration */}
@@ -1000,10 +1381,24 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
               <button
                 onClick={handleMintSingle}
                 id="mint-single-submit-btn"
-                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-bold text-sm shadow-xl shadow-cyan-500/20 transition-all flex items-center justify-center gap-2"
+                disabled={isWipLockedForUser}
+                className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+                  isWipLockedForUser
+                    ? 'bg-zinc-800 text-zinc-400 border border-amber-500/30 cursor-not-allowed shadow-none'
+                    : 'bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-xl shadow-cyan-500/20 cursor-pointer'
+                }`}
               >
-                <Sparkles className="w-4 h-4" />
-                Mint NFT on {currentChainConfig.name}
+                {isWipLockedForUser ? (
+                  <>
+                    <Lock className="w-4 h-4 text-amber-400" />
+                    <span>Locked: Authorized Creators Only (0xBaB0... &amp; 0xB30e...)</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Mint NFT on {currentChainConfig.name}</span>
+                  </>
+                )}
               </button>
 
             </div>
@@ -1070,6 +1465,31 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
               {/* Left Column: Core Contract Configuration (7 cols) */}
               <div className="lg:col-span-7 space-y-5">
                 
+                {/* Collection Contract (1/1000) Factory Banner */}
+                <div className="p-4 rounded-xl bg-cyan-950/20 border border-cyan-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-start gap-2.5">
+                    <Sparkles className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-bold text-cyan-200">
+                        Collection Contract (1/1000) Factory
+                      </div>
+                      <div className="text-[11px] text-zinc-400">
+                        Smart contracts for new 1/1000 collections are deployed via factory address:
+                        <span className="ml-1 font-mono text-cyan-300 font-semibold select-all">0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37</span>
+                      </div>
+                    </div>
+                  </div>
+                  {contractMaxSupply !== 1000 && (
+                    <button
+                      type="button"
+                      onClick={() => setContractMaxSupply(1000)}
+                      className="px-2.5 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-[11px] font-semibold rounded-lg shrink-0 transition-colors cursor-pointer"
+                    >
+                      Set 1000 Max Supply
+                    </button>
+                  )}
+                </div>
+
                 {/* 1. Token Standard Selection (ERC-721 vs ERC-1155) */}
                 <div className="p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-3">
                   <div className="flex items-center justify-between">
@@ -1405,7 +1825,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                       <Fuel className="w-4 h-4 text-emerald-400" />
                       Smart Contract Deployment Gas Fee
                     </span>
-                    <span className="font-mono text-zinc-400">{currentChainConfig.name}</span>
+                    <NetworkSelectorDropdown variant="compact" id="deploy-gas-network-dropdown" />
                   </div>
 
                   {/* Speed Selector */}

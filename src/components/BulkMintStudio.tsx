@@ -21,6 +21,7 @@ import {
   ChevronRight, 
   Zap, 
   Lock, 
+  Unlock,
   DollarSign, 
   Filter, 
   Search, 
@@ -45,6 +46,12 @@ import {
   BlockchainNetwork 
 } from '../types';
 import { useWeb3 } from '../context/Web3Context';
+import { 
+  WIP_COLLECTION, 
+  WIP_LOGO_COLLECTION, 
+  WIP_AUTHORIZED_MINTERS, 
+  isAuthorizedWipMinter 
+} from '../config/wipCollection';
 import { 
   parseSpreadsheetFile, 
   parseCSVText, 
@@ -81,6 +88,7 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
     collections,
     bulkMintNFTs,
     claimFaucetTokens,
+    syncWipCollections,
   } = useWeb3();
 
   // Active items in the bulk batch
@@ -103,6 +111,18 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
   const [targetMode, setTargetMode] = useState<'new_collection' | 'existing_collection' | 'standalone'>('new_collection');
   const [existingCollectionId, setExistingCollectionId] = useState<string>(collections[0]?.id || '');
   
+  // WIP Authorization & Lock Check
+  const selectedBulkCol = collections.find(c => c.id === existingCollectionId);
+  const isBulkColWip = selectedBulkCol ? (
+    selectedBulkCol.id === 'col-wip-polygon' ||
+    selectedBulkCol.id === 'col-wip-logo-polygon' ||
+    selectedBulkCol.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+    selectedBulkCol.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
+    (!!selectedBulkCol.name && selectedBulkCol.name.toLowerCase().includes('work in progress') && !selectedBulkCol.name.toLowerCase().includes('collection contract'))
+  ) : false;
+  const isBulkUserAuthorizedForWip = isAuthorizedWipMinter(activeAccount.address);
+  const isBulkLockedForUser = targetMode === 'existing_collection' && isBulkColWip && !isBulkUserAuthorizedForWip;
+
   // New Collection Parameters
   const [newCollectionName, setNewCollectionName] = useState('Cyberpunk Syndicate');
   const [newCollectionSymbol, setNewCollectionSymbol] = useState('CYBER');
@@ -420,6 +440,11 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
       return;
     }
 
+    if (isBulkLockedForUser) {
+      showNotification('Work In Progress - WIP & WIP Logo collections are locked to authorized creators only.', 'error');
+      return;
+    }
+
     if (!hasSufficientBalance) {
       showNotification(`Insufficient ${currentChainConfig.symbol} balance. Claim from faucet!`, 'error');
       return;
@@ -505,6 +530,9 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
         origin: { y: 0.6 },
         colors: ['#06b6d4', '#8b5cf6', '#ec4899', '#10b981'],
       });
+
+      // Synchronize batch mints with the marketplace immediately
+      syncWipCollections(false).catch(() => {});
 
     } catch (err: any) {
       console.error('Batch mint error:', err);
@@ -858,12 +886,44 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
                   onChange={(e) => setExistingCollectionId(e.target.value)}
                   className="w-full px-3 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500/60"
                 >
-                  {collections.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.symbol}) — {c.currentSupply} / {c.maxSupply} minted — {c.contractAddress.slice(0, 10)}...
-                    </option>
-                  ))}
+                  {collections.map(c => {
+                    const isWip = 
+                      c.id === 'col-wip-polygon' || 
+                      c.id === 'col-wip-logo-polygon' || 
+                      c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() || 
+                      c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
+                    const isLocked = isWip && !isBulkUserAuthorizedForWip;
+                    return (
+                      <option key={c.id} value={c.id}>
+                        {isLocked ? '🔒 [Locked] ' : (isWip ? '🔓 [Authorized] ' : '')}{c.name} ({c.symbol}) — {c.currentSupply} / {c.maxSupply} minted — {c.contractAddress.slice(0, 8)}...
+                      </option>
+                    );
+                  })}
                 </select>
+              )}
+
+              {isBulkLockedForUser && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-1.5 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 font-bold text-amber-300">
+                    <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Work In Progress Collections Locked</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-300 leading-relaxed">
+                    This collection is restricted to authorized creator wallets (<span className="font-mono text-amber-200">{WIP_AUTHORIZED_MINTERS[0].slice(0, 8)}...</span> &amp; <span className="font-mono text-amber-200">{WIP_AUTHORIZED_MINTERS[1].slice(0, 8)}...</span>). Connected wallet cannot mint to it.
+                  </p>
+                </div>
+              )}
+
+              {isBulkColWip && isBulkUserAuthorizedForWip && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <Unlock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Authorized Creator Wallet Verified</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 font-bold">
+                    AUTHORIZED
+                  </span>
+                </div>
               )}
             </div>
           )}
@@ -1233,12 +1293,25 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
 
           <button
             onClick={handleExecuteBulkMint}
-            disabled={selectedCount === 0 || !hasSufficientBalance || isExecuting}
+            disabled={selectedCount === 0 || !hasSufficientBalance || isExecuting || isBulkLockedForUser}
             id="execute-bulk-mint-btn"
-            className="py-3.5 px-8 rounded-2xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-bold text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-indigo-600/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+            className={`py-3.5 px-8 rounded-2xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all shrink-0 ${
+              isBulkLockedForUser
+                ? 'bg-zinc-800 text-zinc-400 border border-amber-500/30 cursor-not-allowed shadow-none'
+                : 'bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-xl shadow-indigo-600/25 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer'
+            }`}
           >
-            <Sparkles className="w-4 h-4" />
-            <span>Execute Batch Mint ({selectedCount} NFTs)</span>
+            {isBulkLockedForUser ? (
+              <>
+                <Lock className="w-4 h-4 text-amber-400" />
+                <span>Locked: Authorized Creators Only</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>Execute Batch Mint ({selectedCount} NFTs)</span>
+              </>
+            )}
           </button>
         </div>
 
