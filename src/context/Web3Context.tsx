@@ -215,22 +215,47 @@ const STORAGE_KEYS = {
   BRIDGE_TXS: 'crosschain_nft_platform_bridge_txs_v1',
 };
 
+const safeGetItem = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const safeSetItem = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`[Storage] Failed to write key "${key}" to localStorage:`, err);
+    try {
+      // If quota exceeded, clear non-critical caches to free up quota
+      localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
+      localStorage.removeItem(STORAGE_KEYS.BRIDGE_TXS);
+      localStorage.removeItem(STORAGE_KEYS.ROYALTIES);
+      localStorage.setItem(key, value);
+    } catch {
+      // Gracefully continue in memory
+    }
+  }
+};
+
 export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Active Chain
   const [activeChain, setActiveChain] = useState<BlockchainNetwork>(() => {
-    const defaultApplied = localStorage.getItem('wip_nft_default_polygon_applied_v1');
+    const defaultApplied = safeGetItem('wip_nft_default_polygon_applied_v1');
     if (!defaultApplied) {
-      localStorage.setItem('wip_nft_default_polygon_applied_v1', 'true');
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_CHAIN, 'polygon');
+      safeSetItem('wip_nft_default_polygon_applied_v1', 'true');
+      safeSetItem(STORAGE_KEYS.ACTIVE_CHAIN, 'polygon');
       return 'polygon';
     }
-    const saved = localStorage.getItem(STORAGE_KEYS.ACTIVE_CHAIN);
+    const saved = safeGetItem(STORAGE_KEYS.ACTIVE_CHAIN);
     return (saved && SUPPORTED_CHAINS[saved as BlockchainNetwork]) ? (saved as BlockchainNetwork) : 'polygon';
   });
 
   // Network Mode: Mainnet vs Testnet
   const [networkMode, setNetworkMode] = useState<NetworkMode>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.NETWORK_MODE);
+    const saved = safeGetItem(STORAGE_KEYS.NETWORK_MODE);
     return (saved === 'mainnet' || saved === 'testnet') ? (saved as NetworkMode) : 'mainnet';
   });
 
@@ -240,7 +265,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Wallet
   const [accounts, setAccounts] = useState<WalletAccount[]>(() => {
-    const savedBalances = localStorage.getItem(STORAGE_KEYS.BALANCES);
+    const savedBalances = safeGetItem(STORAGE_KEYS.BALANCES);
     if (savedBalances) {
       try {
         const parsed = JSON.parse(savedBalances);
@@ -256,7 +281,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [activeAccountIndex, setActiveAccountIndex] = useState<number>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.WALLET_INDEX);
+    const saved = safeGetItem(STORAGE_KEYS.WALLET_INDEX);
     return saved ? parseInt(saved, 10) : 0;
   });
 
@@ -274,36 +299,46 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     { time: 'Now', gwei: 18.0 },
   ]);
 
-  // Data collections
+  // Data collections - strictly deduplicated by ID and on-chain contract/token key
   const [nfts, setNfts] = useState<NFT[]>(() => {
-    let list = INITIAL_NFTS;
-    const saved = localStorage.getItem(STORAGE_KEYS.NFTS);
+    let list: NFT[] = [];
+    const saved = safeGetItem(STORAGE_KEYS.NFTS);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const existingIds = new Set(parsed.map((n: NFT) => n.id));
-          const missingInitial = INITIAL_NFTS.filter(n => !existingIds.has(n.id));
-          list = [...parsed, ...missingInitial];
+          list = parsed;
         }
       } catch {}
     }
-    const existingIds = new Set(list.map(n => n.id));
-    const missingWip = INITIAL_NFTS.filter(n => 
-      (n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
-       n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
-       n.collectionId === 'col-wip-polygon' ||
-       n.collectionId === 'col-wip-logo-polygon') && !existingIds.has(n.id)
-    );
-    if (missingWip.length > 0) {
-      list = [...missingWip, ...list];
+
+    const combined = [...list, ...INITIAL_NFTS];
+    const uniqueMap = new Map<string, NFT>();
+    const seenContractTokens = new Set<string>();
+
+    for (const nft of combined) {
+      if (!nft || !nft.id) continue;
+      const lowerId = String(nft.id).toLowerCase();
+      if (uniqueMap.has(lowerId)) continue;
+
+      if (nft.contractAddress && nft.tokenId) {
+        const tokenKey = `${nft.contractAddress.toLowerCase()}:${String(nft.tokenId).replace(/^#/, '').toLowerCase()}`;
+        if (seenContractTokens.has(tokenKey)) continue;
+        seenContractTokens.add(tokenKey);
+      }
+
+      uniqueMap.set(lowerId, nft);
     }
-    return list;
+
+    const result = Array.from(uniqueMap.values());
+    // Write back clean deduplicated list to avoid localStorage quota issues
+    safeSetItem(STORAGE_KEYS.NFTS, JSON.stringify(result));
+    return result;
   });
 
   const [collections, setCollections] = useState<NFTCollection[]>(() => {
     let list = INITIAL_COLLECTIONS;
-    const saved = localStorage.getItem(STORAGE_KEYS.COLLECTIONS);
+    const saved = safeGetItem(STORAGE_KEYS.COLLECTIONS);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -314,6 +349,18 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       } catch {}
     }
+
+    // Deduplicate collections
+    const uniqueMap = new Map<string, NFTCollection>();
+    for (const col of list) {
+      if (!col) continue;
+      const key = col.id ? col.id.toLowerCase() : col.contractAddress?.toLowerCase();
+      if (key && !uniqueMap.has(key)) {
+        uniqueMap.set(key, col);
+      }
+    }
+    list = Array.from(uniqueMap.values());
+
     const hasWip = list.some(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
     if (!hasWip) {
       const wipCol = INITIAL_COLLECTIONS.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase());
@@ -332,7 +379,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [transactions, setTransactions] = useState<TransactionRecord[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+    const saved = safeGetItem(STORAGE_KEYS.TRANSACTIONS);
     if (saved) {
       try { return JSON.parse(saved); } catch {}
     }
@@ -340,7 +387,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [royaltyLogs, setRoyaltyLogs] = useState<RoyaltyPayoutRecord[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ROYALTIES);
+    const saved = safeGetItem(STORAGE_KEYS.ROYALTIES);
     if (saved) {
       try { return JSON.parse(saved); } catch {}
     }
@@ -350,44 +397,44 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [offers, setOffers] = useState<NFTOffer[]>([]);
 
   const [bridgeTransactions, setBridgeTransactions] = useState<BridgeTransaction[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.BRIDGE_TXS);
+    const saved = safeGetItem(STORAGE_KEYS.BRIDGE_TXS);
     if (saved) {
       try { return JSON.parse(saved); } catch {}
     }
     return INITIAL_BRIDGE_TRANSACTIONS;
   });
 
-  // Sync to local storage
+  // Safe Sync to local storage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.NFTS, JSON.stringify(nfts));
+    safeSetItem(STORAGE_KEYS.NFTS, JSON.stringify(nfts));
   }, [nfts]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(collections));
+    safeSetItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(collections));
   }, [collections]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    safeSetItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
   }, [transactions]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ROYALTIES, JSON.stringify(royaltyLogs));
+    safeSetItem(STORAGE_KEYS.ROYALTIES, JSON.stringify(royaltyLogs));
   }, [royaltyLogs]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.BRIDGE_TXS, JSON.stringify(bridgeTransactions));
+    safeSetItem(STORAGE_KEYS.BRIDGE_TXS, JSON.stringify(bridgeTransactions));
   }, [bridgeTransactions]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_CHAIN, activeChain);
+    safeSetItem(STORAGE_KEYS.ACTIVE_CHAIN, activeChain);
   }, [activeChain]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.NETWORK_MODE, networkMode);
+    safeSetItem(STORAGE_KEYS.NETWORK_MODE, networkMode);
   }, [networkMode]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.WALLET_INDEX, activeAccountIndex.toString());
+    safeSetItem(STORAGE_KEYS.WALLET_INDEX, activeAccountIndex.toString());
   }, [activeAccountIndex]);
 
   useEffect(() => {
@@ -395,7 +442,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     accounts.forEach(a => {
       balanceMap[a.address] = a.balances;
     });
-    localStorage.setItem(STORAGE_KEYS.BALANCES, JSON.stringify(balanceMap));
+    safeSetItem(STORAGE_KEYS.BALANCES, JSON.stringify(balanceMap));
   }, [accounts]);
 
   const activeAccount = accounts[activeAccountIndex] || accounts[0];
@@ -419,116 +466,184 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const syncWipCollections = useCallback(async (silent = false): Promise<{ success: boolean; totalWipCount: number; newCount: number }> => {
     if (!silent) setIsAutoSyncing(true);
     let newItemsAdded = 0;
+    let finalWipCount = 0;
+    let finalLogoCount = 0;
 
     try {
-      // 1. Ensure all standard WIP & Logo NFTs from initial data exist
-      const currentIds = new Set(nfts.map(n => n.id));
-      const missingInitialWip = INITIAL_NFTS.filter(n => 
-        (n.collectionId === 'col-wip-polygon' ||
-         n.collectionId === 'col-wip-logo-polygon' ||
-         n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
-         n.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()) &&
-        !currentIds.has(n.id)
-      );
-
-      let updatedList = [...nfts];
-      if (missingInitialWip.length > 0) {
-        updatedList = [...missingInitialWip, ...updatedList];
-        newItemsAdded += missingInitialWip.length;
-      }
-
-      // 2. Fetch server-side live minted tokens or Supabase tokens from /api/wip/tokens
+      let tokensFromBackend: any[] = [];
       try {
         const res = await fetch('/api/wip/tokens');
         if (res.ok) {
           const json = await res.json();
           if (json.success && Array.isArray(json.tokens)) {
-            const currentTokenIdsOrNames = new Set(updatedList.map(n => n.id));
-            const newRemoteNFTs: NFT[] = [];
-
-            for (const t of json.tokens) {
-              const syntheticId = `nft-live-${t.id || t.token_id}`;
-              if (!currentTokenIdsOrNames.has(syntheticId) && !currentTokenIdsOrNames.has(t.id)) {
-                const isLogo = t.collection_id === 'col-wip-logo-polygon' || 
-                  t.contract_address?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
-                  String(t.name || '').toLowerCase().includes('logo');
-                const col = isLogo ? WIP_LOGO_COLLECTION : WIP_COLLECTION;
-
-                const newNft: NFT = {
-                  id: t.id ? (String(t.id).startsWith('nft-') ? t.id : `nft-${t.id}`) : syntheticId,
-                  tokenId: t.token_id ? (String(t.token_id).startsWith('#') ? t.token_id : `#${t.token_id}`) : `#${Math.floor(1000 + Math.random()*9000)}`,
-                  name: t.name || `${col.name} #${t.token_id || 'Mint'}`,
-                  description: t.description || `Official minted item in ${col.name} on Polygon. Auto-synchronized with 10% secondary royalty.`,
-                  image: t.image || t.image_ipfs_uri || (isLogo ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80' : 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80'),
-                  chainId: 'polygon',
-                  standard: 'ERC-721',
-                  collectionId: col.id,
-                  collectionName: col.name,
-                  creatorAddress: col.royaltyReceiver,
-                  creatorName: 'WIP Collective',
-                  ownerAddress: t.owner_wallet || activeAccount.address,
-                  ownerName: t.owner_wallet ? `${t.owner_wallet.slice(0, 6)}...${t.owner_wallet.slice(-4)}` : activeAccount.name,
-                  royaltyPercentage: col.royaltyBps / 100,
-                  royaltyPayoutAddress: col.royaltyReceiver,
-                  price: t.price || (isLogo ? 50.0 : 25.0),
-                  isListed: true,
-                  listedAt: Date.now(),
-                  createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
-                  traits: t.traits || [
-                    { trait_type: 'Collection', value: col.name, rarityPercentage: 5 },
-                    { trait_type: 'Auto Sync Status', value: 'Live On-Chain Synchronized', rarityPercentage: 100 },
-                    { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-                  ],
-                  ipfsMetadataUri: t.metadata_ipfs_uri || `ipfs://QmWipAutoSync${Date.now()}`,
-                  ipfsImageUri: t.image || t.image_ipfs_uri || `ipfs://QmWipAutoSyncImage${Date.now()}`,
-                  contractAddress: col.contractAddress,
-                  txHash: t.tx_hash || `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
-                  editionTotal: 1,
-                  editionNumber: 1,
-                  viewsCount: Math.floor(20 + Math.random()*150),
-                  likesCount: Math.floor(Math.random()*40),
-                };
-                newRemoteNFTs.push(newNft);
-              }
-            }
-
-            if (newRemoteNFTs.length > 0) {
-              updatedList = [...newRemoteNFTs, ...updatedList];
-              newItemsAdded += newRemoteNFTs.length;
-            }
+            tokensFromBackend = json.tokens;
           }
         }
-      } catch (err) {
+      } catch {
         // Backend offline or local fallback
       }
 
-      if (newItemsAdded > 0) {
-        setNfts(updatedList);
-        localStorage.setItem(STORAGE_KEYS.NFTS, JSON.stringify(updatedList));
-      }
+      setNfts(currentNfts => {
+        // Track seen IDs and contract+token keys
+        const seenIdSet = new Set<string>();
+        const seenContractTokenSet = new Set<string>();
 
-      // Update collection currentSupply to match actual count of NFTs
-      const wipCount = updatedList.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length;
-      const logoCount = updatedList.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length;
+        // Deduplicate current state
+        const deduplicatedCurrent: NFT[] = [];
+        for (const nft of currentNfts) {
+          if (!nft || !nft.id) continue;
+          const lowerId = String(nft.id).toLowerCase();
+          if (seenIdSet.has(lowerId)) continue;
+          seenIdSet.add(lowerId);
 
+          if (nft.contractAddress && nft.tokenId) {
+            const tokenKey = `${nft.contractAddress.toLowerCase()}:${String(nft.tokenId).replace(/^#/, '').toLowerCase()}`;
+            seenContractTokenSet.add(tokenKey);
+          }
+          deduplicatedCurrent.push(nft);
+        }
+
+        // Check if any initial WIP NFTs are missing
+        const missingInitialWip: NFT[] = [];
+        for (const n of INITIAL_NFTS) {
+          if (!n || !n.id) continue;
+          const lowerId = String(n.id).toLowerCase();
+          if (seenIdSet.has(lowerId)) continue;
+          
+          if (n.contractAddress && n.tokenId) {
+            const tokenKey = `${n.contractAddress.toLowerCase()}:${String(n.tokenId).replace(/^#/, '').toLowerCase()}`;
+            if (seenContractTokenSet.has(tokenKey)) continue;
+            seenContractTokenSet.add(tokenKey);
+          }
+
+          const isWipOrLogo = 
+            n.collectionId === 'col-wip-polygon' ||
+            n.collectionId === 'col-wip-logo-polygon' ||
+            n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
+            n.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
+
+          if (isWipOrLogo) {
+            seenIdSet.add(lowerId);
+            missingInitialWip.push(n);
+          }
+        }
+
+        // Process remote tokens from backend
+        const newRemoteNFTs: NFT[] = [];
+        for (const t of tokensFromBackend) {
+          const rawId = String(t.id || t.token_id || t.tokenId || '');
+          const targetId = t.id 
+            ? (String(t.id).startsWith('nft-') ? String(t.id) : `nft-${t.id}`)
+            : `nft-live-${t.tokenId !== undefined ? t.tokenId : t.token_id || Math.floor(Math.random()*100000)}`;
+
+          const lowerTargetId = targetId.toLowerCase();
+          if (seenIdSet.has(lowerTargetId)) continue;
+          if (t.id && seenIdSet.has(String(t.id).toLowerCase())) continue;
+          if (t.id && seenIdSet.has(`nft-${t.id}`.toLowerCase())) continue;
+
+          // Check contractAddress + tokenId
+          const contractAddr = t.contract_address || WIP_COLLECTION.contractAddress;
+          const cleanTokenId = String(t.token_id || t.tokenId || '').replace(/^#/, '').toLowerCase();
+          if (cleanTokenId) {
+            const tokenKey = `${contractAddr.toLowerCase()}:${cleanTokenId}`;
+            if (seenContractTokenSet.has(tokenKey)) {
+              continue;
+            }
+            seenContractTokenSet.add(tokenKey);
+          }
+
+          seenIdSet.add(lowerTargetId);
+
+          const isLogo = t.collection_id === 'col-wip-logo-polygon' || 
+            String(t.contract_address || '').toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
+            String(t.name || '').toLowerCase().includes('logo');
+          const col = isLogo ? WIP_LOGO_COLLECTION : WIP_COLLECTION;
+
+          const newNft: NFT = {
+            id: targetId,
+            tokenId: t.token_id ? (String(t.token_id).startsWith('#') ? t.token_id : `#${t.token_id}`) : (t.tokenId !== undefined ? `#${t.tokenId}` : `#${Math.floor(1000 + Math.random()*9000)}`),
+            name: t.name || `${col.name} #${t.token_id ?? t.tokenId ?? 'Mint'}`,
+            description: t.description || `Official minted item in ${col.name} on Polygon. Auto-synchronized with 10% secondary royalty.`,
+            image: t.image || t.image_ipfs_uri || (isLogo ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80' : 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80'),
+            chainId: 'polygon',
+            standard: 'ERC-721',
+            collectionId: col.id,
+            collectionName: col.name,
+            creatorAddress: col.royaltyReceiver,
+            creatorName: 'WIP Collective',
+            ownerAddress: t.owner_wallet || activeAccount.address,
+            ownerName: t.owner_wallet ? `${t.owner_wallet.slice(0, 6)}...${t.owner_wallet.slice(-4)}` : activeAccount.name,
+            royaltyPercentage: col.royaltyBps / 100,
+            royaltyPayoutAddress: col.royaltyReceiver,
+            price: t.price || (isLogo ? 50.0 : 25.0),
+            isListed: true,
+            listedAt: Date.now(),
+            createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
+            traits: t.traits || [
+              { trait_type: 'Collection', value: col.name, rarityPercentage: 5 },
+              { trait_type: 'Auto Sync Status', value: 'Live On-Chain Synchronized', rarityPercentage: 100 },
+              { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
+            ],
+            ipfsMetadataUri: t.metadata_ipfs_uri || `ipfs://QmWipAutoSync${Date.now()}`,
+            ipfsImageUri: t.image || t.image_ipfs_uri || `ipfs://QmWipAutoSyncImage${Date.now()}`,
+            contractAddress: col.contractAddress,
+            txHash: t.tx_hash || `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
+            editionTotal: 1,
+            editionNumber: 1,
+            viewsCount: Math.floor(20 + Math.random()*150),
+            likesCount: Math.floor(Math.random()*40),
+          };
+          newRemoteNFTs.push(newNft);
+        }
+
+        const addedCount = missingInitialWip.length + newRemoteNFTs.length;
+        newItemsAdded = addedCount;
+
+        let merged = deduplicatedCurrent;
+        if (addedCount > 0) {
+          merged = [...newRemoteNFTs, ...missingInitialWip, ...deduplicatedCurrent];
+        }
+
+        // Final strict deduplication pass
+        const finalMap = new Map<string, NFT>();
+        for (const item of merged) {
+          if (item && item.id && !finalMap.has(item.id.toLowerCase())) {
+            finalMap.set(item.id.toLowerCase(), item);
+          }
+        }
+        const finalList = Array.from(finalMap.values());
+
+        finalWipCount = finalList.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length;
+        finalLogoCount = finalList.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length;
+
+        // If list was deduplicated or new items were added, update and persist
+        if (finalList.length !== currentNfts.length || addedCount > 0) {
+          safeSetItem(STORAGE_KEYS.NFTS, JSON.stringify(finalList));
+          return finalList;
+        }
+
+        return currentNfts;
+      });
+
+      // Update collection supply
       setCollections(prevCols => prevCols.map(col => {
         if (col.id === 'col-wip-polygon' || col.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()) {
-          return { ...col, currentSupply: wipCount };
+          return { ...col, currentSupply: finalWipCount || col.currentSupply };
         }
         if (col.id === 'col-wip-logo-polygon' || col.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()) {
-          return { ...col, currentSupply: logoCount };
+          return { ...col, currentSupply: finalLogoCount || col.currentSupply };
         }
         return col;
       }));
 
       setLastSyncTimestamp(Date.now());
-      return { success: true, totalWipCount: wipCount + logoCount, newCount: newItemsAdded };
+      return { success: true, totalWipCount: finalWipCount + finalLogoCount, newCount: newItemsAdded };
     } finally {
       if (!silent) {
         setTimeout(() => setIsAutoSyncing(false), 400);
       }
     }
-  }, [nfts, activeAccount]);
+  }, [activeAccount.address, activeAccount.name]);
 
   // Periodic Auto-Sync Effect for WIP Mints
   useEffect(() => {
@@ -537,20 +652,55 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const intervalId = setInterval(() => {
       syncWipCollections(true);
-    }, 12000);
-
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEYS.NFTS) {
-        syncWipCollections(true);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
+    }, 15000);
 
     return () => {
       clearInterval(intervalId);
-      window.removeEventListener('storage', handleStorage);
     };
   }, [autoSyncEnabled, syncWipCollections]);
+
+  // Intercept extension unhandled errors and rejections (e.g. MetaMask inpage script errors in iframes)
+  useEffect(() => {
+    const isExtensionError = (msg?: string, source?: string) => {
+      const str = String(msg || '');
+      const file = String(source || '');
+      return (
+        file.includes('chrome-extension://') ||
+        file.includes('moz-extension://') ||
+        file.includes('inpage.js') ||
+        str.includes('MetaMask') ||
+        str.includes('Failed to connect') ||
+        str.includes('User rejected') ||
+        str.includes('inpage.js') ||
+        str.includes('chrome.runtime')
+      );
+    };
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reasonStr = String(event?.reason?.message || event?.reason || '');
+      const stackStr = String(event?.reason?.stack || '');
+      if (isExtensionError(reasonStr, stackStr)) {
+        event.preventDefault();
+        event.stopImmediatePropagation?.();
+      }
+    };
+
+    const handleError = (event: ErrorEvent) => {
+      const msg = String(event?.message || event?.error?.message || '');
+      const file = String(event?.filename || event?.error?.stack || '');
+      if (isExtensionError(msg, file)) {
+        event.preventDefault();
+        event.stopImmediatePropagation?.();
+      }
+    };
+
+    window.addEventListener('unhandledrejection', handleRejection, true);
+    window.addEventListener('error', handleError, true);
+    return () => {
+      window.removeEventListener('unhandledrejection', handleRejection, true);
+      window.removeEventListener('error', handleError, true);
+    };
+  }, []);
 
   // Live fluctuating gas fee estimation
   useEffect(() => {
@@ -634,17 +784,29 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
           provider = anyWin.ethereum;
         }
 
-        // If provider is found and has request method, attempt to request accounts with a timeout
+        // If provider is found and has request method, attempt to request accounts with safe error capture
         if (provider && typeof provider.request === 'function') {
           try {
-            // Use timeout race to prevent hanging if iframe blocks extension popup
-            const timeoutPromise = new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('Connection request timed out')), 3500)
+            let requestResolved = false;
+            const timeoutPromise = new Promise<null>((resolve) => 
+              setTimeout(() => {
+                if (!requestResolved) resolve(null);
+              }, 2500)
             );
-            const requestPromise = provider.request({ method: 'eth_requestAccounts' });
-            
-            const res = await Promise.race([requestPromise, timeoutPromise]) as string[];
-            if (res && res.length > 0) {
+
+            const requestPromise = provider.request({ method: 'eth_requestAccounts' })
+              .then((res: any) => {
+                requestResolved = true;
+                return res as string[];
+              })
+              .catch((err: any) => {
+                requestResolved = true;
+                console.info(`[Wallet] Extension request handled for ${providerName}:`, err?.message || err);
+                return null;
+              });
+
+            const res = await Promise.race([requestPromise, timeoutPromise]);
+            if (Array.isArray(res) && res.length > 0) {
               const injectedAddress = res[0];
               const existing = accounts.find(a => a.address.toLowerCase() === injectedAddress.toLowerCase());
               if (existing) {
@@ -673,7 +835,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
               return true;
             }
           } catch (err) {
-            console.warn(`Direct injected connection to ${providerName} failed or rejected in this environment. Initializing active ${providerName} session:`, err);
+            console.info(`[Wallet] Direct connection to ${providerName} deferred. Initializing active session:`, err);
           }
         }
       }

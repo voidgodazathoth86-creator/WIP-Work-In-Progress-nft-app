@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useWeb3 } from '../context/Web3Context';
 import { NFTCard } from './NFTCard';
 import { NFT, BlockchainNetwork } from '../types';
@@ -41,9 +41,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectNFT, onOpenMintStu
 
   const [activeTab, setActiveTab] = useState<'collected' | 'minted' | 'collections' | 'royalties' | 'activity'>('collected');
 
-  // Filtered lists
-  const collectedNFTs = nfts.filter(n => n.ownerAddress.toLowerCase() === activeAccount.address.toLowerCase());
-  const createdNFTs = nfts.filter(n => n.creatorAddress.toLowerCase() === activeAccount.address.toLowerCase());
+  // Filtered lists (deduplicated by NFT ID)
+  const collectedNFTs = useMemo(() => {
+    const seen = new Set<string>();
+    return nfts.filter(n => {
+      if (!n || !n.id) return false;
+      const lowerId = String(n.id).toLowerCase();
+      if (seen.has(lowerId)) return false;
+      seen.add(lowerId);
+      return n.ownerAddress.toLowerCase() === activeAccount.address.toLowerCase();
+    });
+  }, [nfts, activeAccount.address]);
+
+  const createdNFTs = useMemo(() => {
+    const seen = new Set<string>();
+    return nfts.filter(n => {
+      if (!n || !n.id) return false;
+      const lowerId = String(n.id).toLowerCase();
+      if (seen.has(lowerId)) return false;
+      seen.add(lowerId);
+      return n.creatorAddress.toLowerCase() === activeAccount.address.toLowerCase();
+    });
+  }, [nfts, activeAccount.address]);
+
   const myCollections = collections.filter(c => c.creatorAddress.toLowerCase() === activeAccount.address.toLowerCase() || true);
 
   return (

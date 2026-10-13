@@ -119,7 +119,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
 
   // Filtered & Sorted NFTs
   const filteredNFTs = useMemo(() => {
+    const seenIds = new Set<string>();
     return nfts.filter((nft) => {
+      if (!nft || !nft.id) return false;
+      const lowerId = String(nft.id).toLowerCase();
+      if (seenIds.has(lowerId)) return false;
+      seenIds.add(lowerId);
+
       // Search query - Real-time filtering by Name, Creator, Collection, Token ID, and Contract Address
       if (searchQuery.trim()) {
         const query = searchQuery.trim().toLowerCase();

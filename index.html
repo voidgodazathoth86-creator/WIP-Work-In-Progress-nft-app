@@ -9,6 +9,47 @@
     <meta property="og:description" content="Multi-chain NFT studio with wallet integration, cross-chain bridge and teleportation, gas fee estimation, AI metadata generation, bulk spreadsheet minting, batch royalty management, and NFT rarity explorer with trait statistical analysis and collection rankings." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        // Intercept browser extension script errors (such as MetaMask inpage.js inside iframes)
+        function shouldSuppressExtensionError(msg, source) {
+          var str = String(msg || '');
+          var file = String(source || '');
+          return (
+            file.includes('chrome-extension://') ||
+            file.includes('moz-extension://') ||
+            file.includes('inpage.js') ||
+            str.includes('MetaMask') ||
+            str.includes('Failed to connect to MetaMask') ||
+            str.includes('Failed to connect') ||
+            str.includes('User rejected the request') ||
+            str.includes('chrome.runtime') ||
+            str.includes('Extension context invalidated')
+          );
+        }
+
+        window.addEventListener('error', function(e) {
+          var message = e.message || (e.error && e.error.message);
+          var filename = e.filename || (e.error && e.error.stack);
+          if (shouldSuppressExtensionError(message, filename)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e.reason;
+          var message = reason ? (reason.message || String(reason)) : '';
+          var stack = reason ? (reason.stack || '') : '';
+          if (shouldSuppressExtensionError(message, stack)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

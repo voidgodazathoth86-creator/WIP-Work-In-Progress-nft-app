@@ -1,13 +1,51 @@
 // deployed-config.ts - FINAL - WIP & Logo standalone + both factories + fee collector
 // Fee goes to collector 0x063A then routed to feeWallet 0xB30e + royaltyWallet 0xBaB0
 
+export const DEPLOYED_FEE_COLLECTOR = {
+  address: "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E",
+  chain: "polygon",
+  block: 93415806,
+  txHash: "0x5a2...b45b1",
+  feeWallet: "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0",
+  royaltyWallet: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762",
+  usdc: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352",
+};
+
+export const OWNER_WALLETS = [
+  "0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0",
+  "0xbab06d358b181eb16e3189525bcc0bc4761a3762",
+];
+
 export const SITE_LINKS = {
   feeCollector: "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E", // WIPFeeCollectorV3_OneClick CONTRACT - correct previous address - CONTRACT
   feeWallet: "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0", // Account 16 - where fees END UP
   royaltyWallet: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762", // royalty
   usdcPolygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352",
-  chain: "polygon"
-}
+  chain: "polygon",
+  website: {
+    url: "",
+    label: "Website",
+    enabled: false,
+  },
+  socials: {
+    twitter: { url: "", label: "X / Twitter", enabled: false },
+    instagram: { url: "", label: "Instagram", enabled: false },
+    discord: { url: "", label: "Discord", enabled: false },
+    tiktok: { url: "", label: "TikTok", enabled: false },
+    youtube: { url: "", label: "YouTube", enabled: false },
+  },
+  blog: {
+    url: "",
+    label: "Blog",
+    enabled: false,
+  },
+  newsletter: {
+    url: "",
+    label: "Newsletter",
+    enabled: false,
+    embedEnabled: false,
+  },
+};
 
 // COLLECTIONS - COMPLETELY SEPARATE - NOT made by any factory - standalone
 export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9"; // WIP - 7 total (5 old + 2 minted through app) - standalone
