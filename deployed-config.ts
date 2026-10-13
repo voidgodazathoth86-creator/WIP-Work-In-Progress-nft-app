@@ -1,4 +1,4 @@
-// deployed-config.ts - FINAL - WIP & Logo standalone + both factories + fee collector
+// deployed-config.ts - FINAL - MANUAL ID - FULL DROP-IN
 // Fee goes to collector 0x063A then routed to feeWallet 0xB30e + royaltyWallet 0xBaB0
 
 export const DEPLOYED_FEE_COLLECTOR = {
@@ -17,16 +17,12 @@ export const OWNER_WALLETS = [
 ];
 
 export const SITE_LINKS = {
-  feeCollector: "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E", // WIPFeeCollectorV3_OneClick CONTRACT - correct previous address - CONTRACT
-  feeWallet: "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0", // Account 16 - where fees END UP
-  royaltyWallet: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762", // royalty
+  feeCollector: "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E",
+  feeWallet: "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0",
+  royaltyWallet: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762",
   usdcPolygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352",
   chain: "polygon",
-  website: {
-    url: "",
-    label: "Website",
-    enabled: false,
-  },
+  website: { url: "", label: "Website", enabled: false },
   socials: {
     twitter: { url: "", label: "X / Twitter", enabled: false },
     instagram: { url: "", label: "Instagram", enabled: false },
@@ -34,34 +30,27 @@ export const SITE_LINKS = {
     tiktok: { url: "", label: "TikTok", enabled: false },
     youtube: { url: "", label: "YouTube", enabled: false },
   },
-  blog: {
-    url: "",
-    label: "Blog",
-    enabled: false,
-  },
-  newsletter: {
-    url: "",
-    label: "Newsletter",
-    enabled: false,
-    embedEnabled: false,
-  },
+  blog: { url: "", label: "Blog", enabled: false },
+  newsletter: { url: "", label: "Newsletter", enabled: false, embedEnabled: false },
 };
 
-// COLLECTIONS - COMPLETELY SEPARATE - NOT made by any factory - standalone
-export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9"; // WIP - 7 total (5 old + 2 minted through app) - standalone
-export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46"; // Logo - NEW - standalone
+export const ON_CHAIN_STATE = {
+  WIP: { address: "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9", totalSupply: 5, nextId: 5, nextPadded: "05", name: "Work-In-Progress-NFTs", symbol: "WIP" },
+  LOGO: { address: "0x675fD85FbcB13CE8080DBba780424A9e571B7f46", totalSupply: 0, nextId: 0, type: "token 1/1" }
+};
 
-// FACTORIES - 2 factories + collector = 3 total - NO PLACEHOLDERS
+export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
+export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46";
+
 export const FACTORIES = {
-  WIP_FACTORY: "0xf685aB23b69364AaF5Eae3C6e6cA2ff53E69E097", // WIPFactory implementation - from screenshot - STAYS
-  COLLECTION_FACTORY: "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37" // Collection Factory NEW - 1 contract = 1000 NFTs - dropdown Collection Contract (1/1000) - build used this
+  WIP_FACTORY: "0xf685aB23b69364AaF5Eae3C6e6cA2ff53E69E097",
+  COLLECTION_FACTORY: "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37"
 }
 
-// UI DROPDOWN OPTIONS - FIXED - Collection Contract (1/1000) uses FACTORY address NOT WIP address
 export const COLLECTION_DROPDOWN_OPTIONS = [
   {
     id: "factory-1-1000",
-    address: FACTORIES.COLLECTION_FACTORY, // 0x663D... CORRECT - NOT WIP
+    address: FACTORIES.COLLECTION_FACTORY,
     name: "Collection Contract (1/1000)",
     symbol: "FACTORY",
     type: "factory",
@@ -70,25 +59,27 @@ export const COLLECTION_DROPDOWN_OPTIONS = [
   },
   {
     id: "1a4eda70-3517-4bf4-acc7-6fb612fcbec7",
-    address: WIP_COLLECTION, // 0xc2ea... WIP standalone - 7 total
+    address: WIP_COLLECTION,
     name: "Work-In-Progress-NFTs",
     symbol: "WIP",
     type: "collection",
     canMintTo: true,
-    supply: "7/1000"
+    supply: `${ON_CHAIN_STATE.WIP.totalSupply}/1000 — Next: #${ON_CHAIN_STATE.WIP.nextPadded} (Manual ID)`,
+    nextId: ON_CHAIN_STATE.WIP.nextId,
+    manualId: true
   },
   {
     id: "logo-new",
-    address: LOGO_COLLECTION, // 0x675f... Logo standalone
+    address: LOGO_COLLECTION,
     name: "Logo",
     symbol: "LOGO",
-    type: "collection",
+    type: "token",
     canMintTo: true,
-    supply: "0/1000"
+    supply: "0/1 — Token Contract 1/1",
+    note: "For 1/1000 Logo collection, deploy new via Collection Factory"
   }
 ]
 
-// MARKETPLACE - shows both WIP + Logo standalone
 export const COLLECTIONS_LIST = [
   {
     id: "1a4eda70-3517-4bf4-acc7-6fb612fcbec7",
@@ -97,21 +88,18 @@ export const COLLECTIONS_LIST = [
     symbol: "WIP",
     type: "collection",
     canMintTo: true,
-    supply: "7/1000"
+    supply: `${ON_CHAIN_STATE.WIP.totalSupply}/1000`,
+    nextId: ON_CHAIN_STATE.WIP.nextId
   },
   {
     id: "logo-new",
     address: LOGO_COLLECTION,
     name: "Logo",
     symbol: "LOGO",
-    type: "collection",
+    type: "token",
     canMintTo: true,
-    supply: "0/1000"
+    supply: "0/1"
   }
 ]
 
-// FOR SUPABASE QUERY - only existing collections
-export const MARKETPLACE_CONTRACTS = [
-  WIP_COLLECTION,
-  LOGO_COLLECTION
-]
+export const MARKETPLACE_CONTRACTS = [WIP_COLLECTION, LOGO_COLLECTION]
