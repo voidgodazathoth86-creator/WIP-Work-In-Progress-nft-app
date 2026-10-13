@@ -312,7 +312,22 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch {}
     }
 
-    const combined = [...list, ...INITIAL_NFTS];
+    // For WIP collection items, ensure the verified on-chain INITIAL_NFTS definitions take precedence
+    const initialWipIds = new Set(INITIAL_NFTS.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).map(n => n.id.toLowerCase()));
+
+    // Filter out obsolete mock WIP tokens from previous sessions
+    const sanitizedSavedList = list.filter(n => {
+      if (!n || !n.id) return false;
+      const isWip = n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase();
+      if (isWip) {
+        if (initialWipIds.has(String(n.id).toLowerCase())) return false;
+        const num = String(n.tokenId || '').replace(/^#/, '');
+        if (['042', '42', '100', '013', '13', '088', '88', '101', '256'].includes(num)) return false;
+      }
+      return true;
+    });
+
+    const combined = [...INITIAL_NFTS, ...sanitizedSavedList];
     const uniqueMap = new Map<string, NFT>();
     const seenContractTokens = new Set<string>();
 
