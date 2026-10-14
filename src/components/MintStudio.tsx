@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useWeb3 } from '../context/Web3Context';
 import { 
   Sparkles, 
@@ -31,7 +31,8 @@ import {
   Zap,
   Globe,
   Settings2,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Hash
 } from 'lucide-react';
 import { generateArtSVG, generateSeedAttributes, GenerativeStyle } from '../services/generativeArt';
 import { NFTTrait, BlockchainNetwork, TokenStandard, NFT, NFTCollection } from '../types';
@@ -72,6 +73,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
     activeAccount, 
     activeBalance,
     collections, 
+    nfts,
     mintNFT, 
     deployCollection,
     syncWipCollections,
@@ -99,10 +101,64 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
   const [hasUnlockable, setHasUnlockable] = useState(false);
   const [unlockableContent, setUnlockableContent] = useState('');
 
+  // Manual / Sequential Token ID Selection
+  const [isManualTokenId, setIsManualTokenId] = useState(false);
+  const [manualTokenId, setManualTokenId] = useState('');
+
   const selectedCol = collections.find(c => c.id === collectionId) ||
     (collectionId === 'col-contract-1000' || collectionId === 'col-wip-1000' || collectionId === COLLECTION_FACTORY_1000.contractAddress ? collections.find(c => c.id === 'col-contract-1000' || c.contractAddress.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase()) : undefined) ||
     (collectionId === 'col-wip-polygon' || collectionId === WIP_COLLECTION.contractAddress ? collections.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()) : undefined) ||
     (collectionId === 'col-wip-logo-polygon' || collectionId === WIP_LOGO_COLLECTION.contractAddress ? collections.find(c => c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()) : undefined);
+
+  // Compute used token IDs in the chosen collection to guarantee numerical order starting with zero
+  const usedTokenIds = useMemo(() => {
+    const targetColId = collectionId === 'col-wip-1000' ? 'col-contract-1000' : collectionId;
+    const targetAddr = selectedCol?.contractAddress;
+
+    const numSet = new Set<number>();
+    const strSet = new Set<string>();
+
+    nfts.forEach(n => {
+      let matches = false;
+      if (targetColId && n.collectionId === targetColId) matches = true;
+      if (targetAddr && n.contractAddress && n.contractAddress.toLowerCase() === targetAddr.toLowerCase()) matches = true;
+      if (!targetColId && !targetAddr && !n.collectionId) matches = true;
+
+      if (matches && n.tokenId) {
+        const clean = String(n.tokenId).replace(/^#/, '').trim();
+        strSet.add(clean.toLowerCase());
+        const num = parseInt(clean, 10);
+        if (!isNaN(num) && num >= 0) {
+          numSet.add(num);
+        }
+      }
+    });
+
+    return { numSet, strSet };
+  }, [nfts, collectionId, selectedCol]);
+
+  // Next available sequential Token ID starting at zero for new collections
+  const suggestedNextTokenId = useMemo(() => {
+    let seq = 0;
+    while (usedTokenIds.numSet.has(seq)) {
+      seq++;
+    }
+    return String(seq);
+  }, [usedTokenIds]);
+
+  // Effective token ID
+  const effectiveTokenId = isManualTokenId && manualTokenId.trim() !== ''
+    ? manualTokenId.trim().replace(/^#/, '')
+    : suggestedNextTokenId;
+
+  const formattedTokenId = `#${effectiveTokenId}`;
+
+  // Collision detection
+  const isTokenIdColliding = useMemo(() => {
+    if (!isManualTokenId || !manualTokenId.trim()) return false;
+    const clean = manualTokenId.trim().replace(/^#/, '').toLowerCase();
+    return usedTokenIds.strSet.has(clean);
+  }, [isManualTokenId, manualTokenId, usedTokenIds]);
 
   // WIP Lock & Access Control
   const isSelectedWipOrLogo = 
@@ -203,7 +259,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
     const newSeed = `CyberMatrix-${Date.now()}-${Math.floor(Math.random()*1000)}`;
     setGenerativeSeed(newSeed);
     if (!name) {
-      setName(`Cosmic Vanguard #${Math.floor(100 + Math.random() * 900)}`);
+      setName(`Cosmic Vanguard ${formattedTokenId}`);
     }
     const generatedTraits = generateSeedAttributes(newSeed, generativeStyle);
     setTraits(generatedTraits as NFTTrait[]);
@@ -378,7 +434,8 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
       const targetChainToMint = selectedCol ? selectedCol.chainId : activeChain;
 
       const result = await mintNFT({
-        name,
+        tokenId: formattedTokenId,
+        name: name.trim() || `${selectedCol?.name || 'Asset'} ${formattedTokenId}`,
         description: description || `Original ${currentChainConfig.standard} digital asset minted on ${currentChainConfig.name}.`,
         image: previewImage,
         chainId: targetChainToMint,
@@ -600,6 +657,12 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                 {/* Royalty Badge on preview */}
                 <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-purple-950/80 backdrop-blur-md border border-purple-500/30 text-[11px] font-bold text-purple-300">
                   {royaltyPercentage}% Royalty
+                </div>
+
+                {/* Token ID Badge on preview */}
+                <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-lg bg-zinc-950/85 backdrop-blur-md border border-cyan-500/40 text-[11px] font-mono font-bold text-cyan-300 flex items-center gap-1 shadow-md">
+                  <Hash className="w-3 h-3 text-cyan-400" />
+                  <span>Token {formattedTokenId}</span>
                 </div>
               </div>
 
@@ -1156,6 +1219,163 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                   <div className="p-2.5 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-[11px] text-zinc-400 flex items-center justify-between">
                     <span>Direct Smart Contract Minting (Single 1/1 Master Token)</span>
                     <span className="text-[10px] font-mono text-zinc-500">{activeChain.toUpperCase()}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Token ID Selection Module (Auto Sequential vs Manual Selection) */}
+              <div className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <label className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                      <Hash className="w-4 h-4 text-cyan-400" />
+                      <span>Token ID Selection *</span>
+                    </label>
+                    <p className="text-[11px] text-zinc-400">
+                      Sequential numerical order starting at zero (#0) for new collections, or choose custom ID
+                    </p>
+                  </div>
+
+                  {/* Mode switcher: Auto Sequential vs Manual Custom */}
+                  <div className="flex items-center gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-semibold">
+                    <button
+                      type="button"
+                      id="token-id-mode-auto"
+                      onClick={() => setIsManualTokenId(false)}
+                      className={`px-3 py-1 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
+                        !isManualTokenId
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold shadow-sm'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Auto Sequential</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="token-id-mode-manual"
+                      onClick={() => {
+                        setIsManualTokenId(true);
+                        if (!manualTokenId) setManualTokenId(suggestedNextTokenId);
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
+                        isManualTokenId
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold shadow-sm'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Manual Select</span>
+                    </button>
+                  </div>
+                </div>
+
+                {!isManualTokenId ? (
+                  /* Auto Sequential View */
+                  <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center font-mono font-black text-cyan-400 text-base shadow-inner">
+                        {formattedTokenId}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-zinc-100 flex items-center gap-2">
+                          <span>Next In Sequence:</span>
+                          <span className="font-mono text-cyan-300 text-sm font-extrabold">{formattedTokenId}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                            Collision Free
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-zinc-400 mt-0.5">
+                          Generated in strict numerical order (starts at #0 for new collections; next unminted sequence for existing contracts).
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      id="btn-switch-to-manual-token-id"
+                      onClick={() => {
+                        setIsManualTokenId(true);
+                        setManualTokenId(suggestedNextTokenId);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition-all border border-zinc-700 cursor-pointer"
+                    >
+                      <Sliders className="w-3 h-3 text-cyan-400" />
+                      <span>Manually Edit ID</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* Manual Selection Input View */
+                  <div className="space-y-2.5 p-3.5 rounded-xl bg-zinc-900/60 border border-purple-500/30">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-bold text-zinc-200 flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                        Specify Desired Token ID:
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setManualTokenId('0')}
+                          className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-mono transition-colors border border-zinc-700"
+                          title="Set to Genesis Token #0"
+                        >
+                          #0 (Genesis)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setManualTokenId(suggestedNextTokenId)}
+                          className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-cyan-300 text-[11px] font-mono transition-colors border border-zinc-700"
+                          title="Set to Next Sequential ID"
+                        >
+                          #{suggestedNextTokenId} (Next Auto)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsManualTokenId(false)}
+                          className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[11px] transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-2.5 text-zinc-500 font-mono font-bold text-sm select-none">
+                        #
+                      </span>
+                      <input
+                        type="text"
+                        id="manual-token-id-input"
+                        placeholder="e.g. 0, 7, 42, 100..."
+                        value={manualTokenId.replace(/^#/, '')}
+                        onChange={(e) => setManualTokenId(e.target.value.trim())}
+                        className="w-full pl-8 pr-28 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-sm font-mono font-bold text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-purple-500/60 shadow-inner"
+                      />
+                      <div className="absolute right-2 top-2">
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-zinc-900 border border-zinc-700 text-zinc-300">
+                          ID: {formattedTokenId}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Live Validation Banner */}
+                    <div className="flex items-center justify-between text-xs px-1">
+                      {isTokenIdColliding ? (
+                        <span className="text-amber-400 flex items-center gap-1.5 font-semibold">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                          <span>Warning: Token ID {formattedTokenId} already exists in this collection. Minting will overwrite or collide.</span>
+                        </span>
+                      ) : (
+                        <span className="text-emerald-400 flex items-center gap-1.5 font-semibold">
+                          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                          <span>Token ID {formattedTokenId} is verified available to mint in {selectedCol?.name || 'collection'}</span>
+                        </span>
+                      )}
+
+                      <span className="text-zinc-500 font-mono text-[11px]">
+                        Used: {usedTokenIds.numSet.size} tokens
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>

@@ -312,22 +312,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch {}
     }
 
-    // For WIP collection items, ensure the verified on-chain INITIAL_NFTS definitions take precedence
-    const initialWipIds = new Set(INITIAL_NFTS.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).map(n => n.id.toLowerCase()));
-
-    // Filter out obsolete mock WIP tokens from previous sessions
-    const sanitizedSavedList = list.filter(n => {
-      if (!n || !n.id) return false;
-      const isWip = n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase();
-      if (isWip) {
-        if (initialWipIds.has(String(n.id).toLowerCase())) return false;
-        const num = String(n.tokenId || '').replace(/^#/, '');
-        if (['042', '42', '100', '013', '13', '088', '88', '101', '256'].includes(num)) return false;
-      }
-      return true;
-    });
-
-    const combined = [...INITIAL_NFTS, ...sanitizedSavedList];
+    const combined = [...list, ...INITIAL_NFTS];
     const uniqueMap = new Map<string, NFT>();
     const seenContractTokens = new Set<string>();
 
@@ -549,7 +534,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const rawId = String(t.id || t.token_id || t.tokenId || '');
           const targetId = t.id 
             ? (String(t.id).startsWith('nft-') ? String(t.id) : `nft-${t.id}`)
-            : `nft-live-${t.tokenId !== undefined ? t.tokenId : t.token_id || Math.floor(Math.random()*100000)}`;
+            : `nft-live-${t.tokenId !== undefined ? t.tokenId : (t.token_id !== undefined ? String(t.token_id).replace(/^#/, '') : 0)}`;
 
           const lowerTargetId = targetId.toLowerCase();
           if (seenIdSet.has(lowerTargetId)) continue;
@@ -576,8 +561,8 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           const newNft: NFT = {
             id: targetId,
-            tokenId: t.token_id ? (String(t.token_id).startsWith('#') ? t.token_id : `#${t.token_id}`) : (t.tokenId !== undefined ? `#${t.tokenId}` : `#${Math.floor(1000 + Math.random()*9000)}`),
-            name: t.name || `${col.name} #${t.token_id ?? t.tokenId ?? 'Mint'}`,
+            tokenId: t.token_id ? (String(t.token_id).startsWith('#') ? t.token_id : `#${t.token_id}`) : (t.tokenId !== undefined ? `#${t.tokenId}` : `#0`),
+            name: t.name || `${col.name} #${t.token_id ?? t.tokenId ?? 0}`,
             description: t.description || `Official minted item in ${col.name} on Polygon. Auto-synchronized with 10% secondary royalty.`,
             image: t.image || t.image_ipfs_uri || (isLogo ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80' : 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80'),
             chainId: 'polygon',
@@ -1002,7 +987,40 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }));
 
     const txHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-    const tokenIdHex = `#${Math.floor(1000 + Math.random() * 9000)}`;
+
+    // Determine tokenId: If user provided a manual token ID, use it.
+    // Otherwise, generate in numerical order starting with zero for new collections!
+    let finalTokenId: string;
+    if (nftData.tokenId && String(nftData.tokenId).trim()) {
+      const cleanManual = String(nftData.tokenId).trim();
+      finalTokenId = cleanManual.startsWith('#') ? cleanManual : `#${cleanManual}`;
+    } else {
+      const targetColId = nftData.collectionId === 'col-wip-1000' ? 'col-contract-1000' : nftData.collectionId;
+      const targetAddr = contractAddr;
+      
+      const colTokens = nfts.filter(n => {
+        if (targetColId && n.collectionId === targetColId) return true;
+        if (targetAddr && n.contractAddress && n.contractAddress.toLowerCase() === targetAddr.toLowerCase()) return true;
+        return false;
+      });
+
+      const usedNumbers = new Set<number>();
+      for (const n of colTokens) {
+        if (!n.tokenId) continue;
+        const clean = String(n.tokenId).replace(/^#/, '').trim();
+        const num = parseInt(clean, 10);
+        if (!isNaN(num) && num >= 0) {
+          usedNumbers.add(num);
+        }
+      }
+
+      let seq = 0;
+      while (usedNumbers.has(seq)) {
+        seq++;
+      }
+      finalTokenId = `#${seq}`;
+    }
+
     const newNftId = `nft-${Date.now()}`;
 
     const isCol1000 =
@@ -1017,8 +1035,8 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const newNft: NFT = {
       id: newNftId,
-      tokenId: tokenIdHex,
-      name: nftData.name || (isWip ? `${matchedCol?.name || 'WIP NFT'} ${tokenIdHex}` : (isCol1000 ? `${matchedCol?.name || 'Edition'} ${tokenIdHex}` : 'Untitled Masterpiece')),
+      tokenId: finalTokenId,
+      name: nftData.name || (isWip ? `${matchedCol?.name || 'WIP NFT'} ${finalTokenId}` : (isCol1000 ? `${matchedCol?.name || 'Edition'} ${finalTokenId}` : `Masterpiece ${finalTokenId}`)),
       description: nftData.description || (isWip ? `Official authenticated item in ${matchedCol?.name || 'Work In Progress Collection'} on Polygon.` : (isCol1000 ? `Verified 1/1000 smart contract edition minted via Collection Factory on Polygon (${COLLECTION_FACTORY_1000.contractAddress}).` : 'Exclusive on-chain NFT minted with cross-chain standard.')),
       image: nftData.image || '',
       animationUrl: nftData.animationUrl,
@@ -1070,7 +1088,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           collection_id: nftData.collectionId || (isLogo ? 'col-wip-logo-polygon' : 'col-wip-polygon'),
-          token_id: tokenIdHex,
+          token_id: finalTokenId,
           name: newNft.name,
           image: newNft.image,
           owner_wallet: activeAccount.address,
@@ -1364,14 +1382,56 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
-    // Build all NFT entities
+    // Build all NFT entities with numerical order starting with zero for new collections
     const createdNFTs: NFT[] = [];
     const now = Date.now();
 
+    // Determine starting token sequence for the collection
+    const usedNumbers = new Set<number>();
+    const isTargetExisting = config.targetMode === 'existing_collection' && (targetCollectionId || targetContractAddress);
+
+    if (isTargetExisting) {
+      const colTokens = nfts.filter(n => {
+        if (targetCollectionId && n.collectionId === targetCollectionId) return true;
+        if (targetContractAddress && n.contractAddress && n.contractAddress.toLowerCase() === targetContractAddress.toLowerCase()) return true;
+        return false;
+      });
+
+      for (const n of colTokens) {
+        if (!n.tokenId) continue;
+        const clean = String(n.tokenId).replace(/^#/, '').trim();
+        const num = parseInt(clean, 10);
+        if (!isNaN(num) && num >= 0) {
+          usedNumbers.add(num);
+        }
+      }
+    }
+
+    let nextAvailableSeq = config.startingTokenId !== undefined && config.startingTokenId >= 0 
+      ? config.startingTokenId 
+      : 0;
+
     items.forEach((item, index) => {
       const itemTxHash = index === 0 ? batchTxHash : `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-      const tokenIdNumber = index + 1;
-      const tokenIdString = `#${String(tokenIdNumber).padStart(3, '0')}`;
+      
+      // Determine tokenId: manual override on item, or sequential starting with zero
+      let tokenIdString: string;
+      let tokenIdNumber: number;
+
+      if (item.tokenId !== undefined && String(item.tokenId).trim() !== '') {
+        const cleanManual = String(item.tokenId).trim();
+        tokenIdString = cleanManual.startsWith('#') ? cleanManual : `#${cleanManual}`;
+        const parsed = parseInt(cleanManual.replace(/^#/, ''), 10);
+        tokenIdNumber = !isNaN(parsed) && parsed >= 0 ? parsed : index;
+      } else {
+        while (usedNumbers.has(nextAvailableSeq)) {
+          nextAvailableSeq++;
+        }
+        tokenIdNumber = nextAvailableSeq;
+        tokenIdString = `#${tokenIdNumber}`;
+        usedNumbers.add(tokenIdNumber);
+        nextAvailableSeq++;
+      }
       
       const isTargetWip = 
         targetCollectionId === 'col-wip-polygon' || 
@@ -1385,7 +1445,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const isListed = isTargetWip ? true : (!!itemPrice && itemPrice > 0);
 
       const newNFT: NFT = {
-        id: `nft-bulk-${now}-${index}-${Math.random().toString(36).substr(2, 5)}`,
+        id: `nft-bulk-${now}-${index}-${index}`,
         tokenId: tokenIdString,
         name: item.name || `Batch NFT ${tokenIdString}`,
         description: item.description || 'Verified multi-chain NFT minted via Nexus Bulk Minting Studio.',
@@ -1405,12 +1465,12 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         listedAt: isListed ? now : undefined,
         createdAt: now + index * 10,
         traits: item.traits && item.traits.length > 0 ? item.traits : [],
-        ipfsMetadataUri: `ipfs://QmBatchManifest${Array.from({length: 32}, () => Math.floor(Math.random()*36).toString(36)).join('')}/${tokenIdNumber}.json`,
-        ipfsImageUri: `ipfs://QmBatchImages${Array.from({length: 32}, () => Math.floor(Math.random()*36).toString(36)).join('')}/${tokenIdNumber}.png`,
+        ipfsMetadataUri: `ipfs://QmBatchManifest/${tokenIdNumber}.json`,
+        ipfsImageUri: `ipfs://QmBatchImages/${tokenIdNumber}.png`,
         contractAddress: targetContractAddress,
         txHash: itemTxHash,
         editionTotal: item.editionTotal || items.length,
-        editionNumber: item.editionNumber || tokenIdNumber,
+        editionNumber: item.editionNumber !== undefined ? item.editionNumber : tokenIdNumber,
         unlockableContent: item.unlockableContent,
         hasUnlockableContent: !!item.unlockableContent,
         viewsCount: 1,

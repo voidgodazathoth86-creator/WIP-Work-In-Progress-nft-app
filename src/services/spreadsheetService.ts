@@ -5,6 +5,7 @@ import { generateArtSVG, generateSeedAttributes } from './generativeArt';
 
 // Normalization mappings for diverse CSV/Excel headers
 const HEADER_SYNONYMS: Record<string, string[]> = {
+  tokenId: ['token_id', 'tokenid', 'token id', 'token #', 'token_number', 'token'],
   name: ['name', 'title', 'nft_name', 'token_name', 'tokenname', 'item_name', 'nft title', 'token id name'],
   description: ['description', 'desc', 'lore', 'summary', 'about', 'details', 'bio', 'story'],
   image: ['image', 'image_url', 'imageurl', 'image uri', 'ipfs_image', 'media', 'art_url', 'artwork', 'preview', 'file', 'asset'],
@@ -163,8 +164,13 @@ export function processRawSpreadsheetData(rows: Record<string, any>[]): BulkNFTI
     // Extract traits
     const traits = extractTraitsFromRow(row);
 
+    // Token ID: user specified or numerical order starting with zero
+    const rawTokenId = rawProps.tokenId !== undefined && String(rawProps.tokenId).trim() !== ''
+      ? (String(rawProps.tokenId).trim().startsWith('#') ? String(rawProps.tokenId).trim() : `#${String(rawProps.tokenId).trim()}`)
+      : `#${idx}`;
+
     // Fallback name
-    const name = (rawProps.name ? String(rawProps.name).trim() : '') || `Genesis Collective #${String(idx + 1).padStart(3, '0')}`;
+    const name = (rawProps.name ? String(rawProps.name).trim() : '') || `Genesis Collective ${rawTokenId}`;
     
     // Fallback description
     const description = (rawProps.description ? String(rawProps.description).trim() : '') || 
@@ -207,6 +213,7 @@ export function processRawSpreadsheetData(rows: Record<string, any>[]): BulkNFTI
     const unlockableContent = rawProps.unlockableContent ? String(rawProps.unlockableContent).trim() : undefined;
 
     const itemPartial: Partial<BulkNFTItem> = {
+      tokenId: rawTokenId,
       name,
       description,
       image,
@@ -222,6 +229,7 @@ export function processRawSpreadsheetData(rows: Record<string, any>[]): BulkNFTI
     return {
       id: `bulk-row-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
       rowIndex: idx + 1,
+      tokenId: rawTokenId,
       name,
       description,
       image,
@@ -231,7 +239,7 @@ export function processRawSpreadsheetData(rows: Record<string, any>[]): BulkNFTI
       unlockableContent,
       traits: finalTraits,
       editionTotal: rawProps.editionTotal ? Number(rawProps.editionTotal) : 1,
-      editionNumber: rawProps.editionNumber ? Number(rawProps.editionNumber) : idx + 1,
+      editionNumber: rawProps.editionNumber ? Number(rawProps.editionNumber) : idx,
       selected: true,
       validationStatus: validation.status,
       validationIssues: validation.issues,

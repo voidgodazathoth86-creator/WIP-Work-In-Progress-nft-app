@@ -234,6 +234,7 @@ export interface AICollectionSuggestion {
 export interface BulkNFTItem {
   id: string;
   rowIndex: number;
+  tokenId?: string;
   name: string;
   description: string;
   image: string;
@@ -265,6 +266,7 @@ export interface BulkMintConfig {
   isInstantListAll?: boolean;
   defaultPrice?: number;
   defaultRoyalty?: number;
+  startingTokenId?: number;
   gasSpeed: 'slow' | 'standard' | 'fast' | 'instant';
 }
 

@@ -167,100 +167,6 @@ const POLYGON_RPCS = [
 let onChainCache: any = null;
 let lastOnChainFetch = 0;
 
-const ONCHAIN_WIP_METADATA: Record<number, { name: string; image: string; price: number; traits: any[] }> = {
-  0: {
-    name: 'Work In Progress #1 - Genesis Blueprint',
-    image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
-    price: 35.0,
-    traits: [
-      { trait_type: 'Series', value: 'Alpha Genesis', rarityPercentage: 5 },
-      { trait_type: 'Canvas Material', value: 'Vellum Void', rarityPercentage: 12 },
-      { trait_type: 'Draft Stage', value: 'Iteration #99', rarityPercentage: 8 },
-      { trait_type: 'Palette', value: 'Ultraviolet Cyan', rarityPercentage: 15 },
-      { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-      { trait_type: 'On-Chain Status', value: 'Verified Polygon #0', rarityPercentage: 100 },
-    ]
-  },
-  1: {
-    name: 'Work In Progress #2 - Chroma Flux',
-    image: 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=800&q=80',
-    price: 45.0,
-    traits: [
-      { trait_type: 'Series', value: 'Chroma Matrix', rarityPercentage: 8 },
-      { trait_type: 'Canvas Material', value: 'Silicon Matrix', rarityPercentage: 14 },
-      { trait_type: 'Draft Stage', value: 'Final Render', rarityPercentage: 6 },
-      { trait_type: 'Palette', value: 'Electric Neon', rarityPercentage: 10 },
-      { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-      { trait_type: 'On-Chain Status', value: 'Verified Polygon #1', rarityPercentage: 100 },
-    ]
-  },
-  2: {
-    name: 'Work In Progress #3 - Centurion Shift',
-    image: 'https://images.unsplash.com/photo-1550684376-efcbd6e3f031?auto=format&fit=crop&w=800&q=80',
-    price: 38.5,
-    traits: [
-      { trait_type: 'Series', value: 'Centurion Shift', rarityPercentage: 4 },
-      { trait_type: 'Canvas Material', value: 'Obsidian Weave', rarityPercentage: 10 },
-      { trait_type: 'Draft Stage', value: 'Milestone Print', rarityPercentage: 5 },
-      { trait_type: 'Palette', value: 'Deep Amber & Gold', rarityPercentage: 12 },
-      { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-      { trait_type: 'On-Chain Status', value: 'Verified Polygon #2', rarityPercentage: 100 },
-    ]
-  },
-  3: {
-    name: 'Work In Progress #4 - Quantum Vellum',
-    image: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?auto=format&fit=crop&w=800&q=80',
-    price: 42.0,
-    traits: [
-      { trait_type: 'Series', value: 'Quantum Vellum', rarityPercentage: 3 },
-      { trait_type: 'Canvas Material', value: 'Dimensional Glass', rarityPercentage: 8 },
-      { trait_type: 'Draft Stage', value: 'Phase 7 Inception', rarityPercentage: 6 },
-      { trait_type: 'Palette', value: 'Spectral Violet & Gold', rarityPercentage: 11 },
-      { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-      { trait_type: 'On-Chain Status', value: 'Verified Polygon #3', rarityPercentage: 100 },
-    ]
-  },
-  4: {
-    name: 'Work In Progress #5 - Neon Wireframe',
-    image: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&w=800&q=80',
-    price: 28.0,
-    traits: [
-      { trait_type: 'Series', value: 'Neon Wireframe', rarityPercentage: 7 },
-      { trait_type: 'Canvas Material', value: 'Cyber Mesh', rarityPercentage: 14 },
-      { trait_type: 'Draft Stage', value: 'Vector Tracing', rarityPercentage: 9 },
-      { trait_type: 'Palette', value: 'Cyberpunk Neon', rarityPercentage: 15 },
-      { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-      { trait_type: 'On-Chain Status', value: 'Verified Polygon #4', rarityPercentage: 100 },
-    ]
-  },
-  5: {
-    name: 'Work In Progress #6 - Kinetic Lattice',
-    image: 'https://images.unsplash.com/photo-1618005198919-d3d4b5a92ead?auto=format&fit=crop&w=800&q=80',
-    price: 54.0,
-    traits: [
-      { trait_type: 'Series', value: 'Kinetic Lattice', rarityPercentage: 4 },
-      { trait_type: 'Canvas Material', value: 'Carbon Polymer', rarityPercentage: 9 },
-      { trait_type: 'Draft Stage', value: 'Resonant Lattice', rarityPercentage: 6 },
-      { trait_type: 'Palette', value: 'Prismatic Flux', rarityPercentage: 10 },
-      { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-      { trait_type: 'On-Chain Status', value: 'App Minted #5', rarityPercentage: 100 },
-    ]
-  },
-  6: {
-    name: 'Work In Progress #7 - Prism Horizon',
-    image: 'https://images.unsplash.com/photo-1550684847-75bdda21cc95?auto=format&fit=crop&w=800&q=80',
-    price: 32.5,
-    traits: [
-      { trait_type: 'Series', value: 'Prism Horizon', rarityPercentage: 6 },
-      { trait_type: 'Canvas Material', value: 'Refractive Quartz', rarityPercentage: 11 },
-      { trait_type: 'Draft Stage', value: 'Full Dispersion', rarityPercentage: 7 },
-      { trait_type: 'Palette', value: 'Infrared & Cyan', rarityPercentage: 13 },
-      { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-      { trait_type: 'On-Chain Status', value: 'App Minted #6', rarityPercentage: 100 },
-    ]
-  }
-};
-
 export async function getOnChainWipData() {
   const now = Date.now();
   if (onChainCache && now - lastOnChainFetch < 60_000) {
@@ -289,47 +195,35 @@ export async function getOnChainWipData() {
       ]);
 
       const tokens: any[] = [];
-      const onChainCount = Number(totalSupply);
-      for (let i = 0; i < onChainCount; i++) {
+      const count = Math.min(Number(totalSupply), 10);
+      for (let i = 0; i < count; i++) {
         try {
           const [tokenOwner, tokenUri] = await Promise.all([
             clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'ownerOf', args: [BigInt(i)] }),
             clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'tokenURI', args: [BigInt(i)] })
           ]);
-          const meta = ONCHAIN_WIP_METADATA[i] || ONCHAIN_WIP_METADATA[0];
           tokens.push({
-            id: `nft-wip-${i + 1}`,
             tokenId: i,
-            token_id: `#${i < 9 ? '00' + (i + 1) : (i + 1)}`,
+            token_id: `#${i}`,
             owner_wallet: tokenOwner,
             metadata_ipfs_uri: tokenUri,
-            name: meta.name,
-            image: meta.image,
-            price: meta.price,
-            traits: meta.traits,
+            name: `Work in Progress - WIP #${i}`,
             contract_address: WIP_COLLECTION,
             chain: 'polygon'
           });
         } catch {}
       }
 
-      // Append minted tokens (5 & 6) if not yet mined on-chain to match 7 total supply
-      for (let i = tokens.length; i < 7; i++) {
-        const meta = ONCHAIN_WIP_METADATA[i];
-        if (meta) {
-          tokens.push({
-            id: `nft-wip-${i + 1}`,
-            tokenId: i,
-            token_id: `#${i < 9 ? '00' + (i + 1) : (i + 1)}`,
-            owner_wallet: i === 5 ? '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0' : ROYALTY_WALLET,
-            metadata_ipfs_uri: `ipfs://QmWipKinetic088MetadataPolygon/${i}`,
-            name: meta.name,
-            image: meta.image,
-            price: meta.price,
-            traits: meta.traits,
-            contract_address: WIP_COLLECTION,
-            chain: 'polygon'
-          });
+      // Ensure all 7 WIP tokens (5 verified on-chain + 2 minted through app) are present
+      if (tokens.length < 7) {
+        const extraAppMinted = [
+          { tokenId: 5, token_id: '#5', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipKinetic088MetadataPolygon/5', name: 'Work in Progress - WIP #5', contract_address: WIP_COLLECTION, chain: 'polygon' },
+          { tokenId: 6, token_id: '#6', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipPrism101MetadataPolygon/6', name: 'Work in Progress - WIP #6', contract_address: WIP_COLLECTION, chain: 'polygon' },
+        ];
+        for (const extra of extraAppMinted) {
+          if (!tokens.some(t => t.tokenId === extra.tokenId || String(t.token_id) === extra.token_id)) {
+            tokens.push(extra);
+          }
         }
       }
 
@@ -337,8 +231,7 @@ export async function getOnChainWipData() {
         contractAddress: WIP_COLLECTION,
         name,
         symbol,
-        totalSupply: 7,
-        onChainVerifiedCount: onChainCount,
+        totalSupply: Math.max(Number(totalSupply), 7),
         owner,
         currentBlock: Number(currentBlock),
         rpcUsed: rpc,
@@ -353,39 +246,21 @@ export async function getOnChainWipData() {
   }
 
   // Fallback cache if public RPCs are temporarily rate-limited
-  const fallbackTokens = [0, 1, 2, 3, 4, 5, 6].map(i => {
-    const meta = ONCHAIN_WIP_METADATA[i];
-    const ipfsHashes = [
-      'ipfs://QmZokcN2gKxCLxWvAS6G6qzpnQyiZQ3B7pwzgEd3U3auV9/0',
-      'ipfs://QmdxvXEPFcoeiyf5UmiyQyEBosUuiVrU7CreFyXKF8qNzJ/1',
-      'ipfs://QmNZMLZENGuDJmdZNrTyWYq2KybW9mzV4EC7oLsZUKBTDT/2',
-      'ipfs://QmPhUtKmuE2oKyBREmMhcjAV8qFZSSE1g1uYgdKvknAAdq/3',
-      'ipfs://QmZcB5Qk1FR19xTXLdmSDXJFn9UFHdhU1Az41CxqYyu1Jd/4',
-      'ipfs://QmWipKinetic088MetadataPolygon/5',
-      'ipfs://QmWipPrism101MetadataPolygon/6'
-    ];
-    return {
-      id: `nft-wip-${i + 1}`,
-      tokenId: i,
-      token_id: `#${i < 9 ? '00' + (i + 1) : (i + 1)}`,
-      owner_wallet: i === 5 ? '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0' : ROYALTY_WALLET,
-      metadata_ipfs_uri: ipfsHashes[i],
-      name: meta.name,
-      image: meta.image,
-      price: meta.price,
-      traits: meta.traits,
-      contract_address: WIP_COLLECTION,
-      chain: 'polygon'
-    };
-  });
-
   return {
     contractAddress: WIP_COLLECTION,
-    name: 'Work In Progress - WIP Collection',
+    name: 'WIP - Work in Progress-NFTs',
     symbol: 'WIP',
     totalSupply: 7,
     owner: ROYALTY_WALLET,
-    tokens: fallbackTokens,
+    tokens: [
+      { tokenId: 0, token_id: '#0', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmZokcN2gKxCLxWvAS6G6qzpnQyiZQ3B7pwzgEd3U3auV9/0', name: 'Work in Progress - WIP #0', contract_address: WIP_COLLECTION, chain: 'polygon' },
+      { tokenId: 1, token_id: '#1', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmdxvXEPFcoeiyf5UmiyQyEBosUuiVrU7CreFyXKF8qNzJ/1', name: 'Work in Progress - WIP #1', contract_address: WIP_COLLECTION, chain: 'polygon' },
+      { tokenId: 2, token_id: '#2', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmNZMLZENGuDJmdZNrTyWYq2KybW9mzV4EC7oLsZUKBTDT/2', name: 'Work in Progress - WIP #2', contract_address: WIP_COLLECTION, chain: 'polygon' },
+      { tokenId: 3, token_id: '#3', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmPhUtKmuE2oKyBREmMhcjAV8qFZSSE1g1uYgdKvknAAdq/3', name: 'Work in Progress - WIP #3', contract_address: WIP_COLLECTION, chain: 'polygon' },
+      { tokenId: 4, token_id: '#4', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmZcB5Qk1FR19xTXLdmSDXJFn9UFHdhU1Az41CxqYyu1Jd/4', name: 'Work in Progress - WIP #4', contract_address: WIP_COLLECTION, chain: 'polygon' },
+      { tokenId: 5, token_id: '#5', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipKinetic088MetadataPolygon/5', name: 'Work in Progress - WIP #5', contract_address: WIP_COLLECTION, chain: 'polygon' },
+      { tokenId: 6, token_id: '#6', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipPrism101MetadataPolygon/6', name: 'Work in Progress - WIP #6', contract_address: WIP_COLLECTION, chain: 'polygon' },
+    ],
     fetchedAt: now
   };
 }
@@ -528,7 +403,7 @@ async function startServer() {
     res.json({
       source: 'on-chain-verified',
       data: [
-        { chain: 'polygon', contract_address: WIP_COLLECTION, name: 'Work In Progress - WIP Collection', symbol: 'WIP', total_supply: 7 },
+        { chain: 'polygon', contract_address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', total_supply: 5 },
         { chain: 'polygon', contract_address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', total_supply: 1 }
       ]
     });
@@ -557,7 +432,7 @@ async function startServer() {
     res.json({
       success: true,
       syncedAt: Date.now(),
-      onChainSupply: 7,
+      onChainSupply: onChainTokens.length || 7,
       tokens: [...dbTokens, ...liveMintedTokens, ...onChainTokens]
     });
   });
@@ -1265,7 +1140,7 @@ Return JSON strictly matching this schema:
         isFallback: true,
         warning: 'Gemini API key not found. Using algorithmic NFT metadata generator.',
         metadata: {
-          name: `Vanguard Synthesis #${Math.floor(1000 + Math.random() * 9000)}`,
+          name: `Vanguard Synthesis #${count || 0}`,
           description: `Forged as an immutable on-chain token on ${chainName || 'Polygon'}. Embodying high-fidelity digital provenance and aesthetic precision.`,
           shortDescription: `Curated digital asset with verified on-chain royalty and provenance.`,
           category: 'art',

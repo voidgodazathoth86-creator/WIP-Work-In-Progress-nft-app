@@ -7,6 +7,7 @@ export interface GenerateMetadataParams {
   userContext?: string;
   standard?: TokenStandard;
   chainName?: string;
+  tokenId?: string | number;
 }
 
 export async function requestAIMetadata(params: GenerateMetadataParams): Promise<{
@@ -44,12 +45,12 @@ export async function requestAIMetadata(params: GenerateMetadataParams): Promise
     console.warn('AI metadata request encountered issue, falling back to local creative synthesis:', err);
     
     // Client-side fallback if server is unreachable
-    const randomId = Math.floor(1000 + Math.random() * 9000);
+    const fallbackTokenId = params.tokenId !== undefined ? String(params.tokenId).replace(/^#/, '') : '0';
     const fallback: AIMetadataSuggestion = {
-      name: `CyberMatrix Vanguard #${randomId}`,
+      name: `CyberMatrix Vanguard #${fallbackTokenId}`,
       alternativeNames: [
-        `Neo-Genesis Sentinel #${randomId}`,
-        `Prismatic Singularity #${Math.floor(randomId / 10)}`,
+        `Neo-Genesis Sentinel #${fallbackTokenId}`,
+        `Prismatic Singularity #${fallbackTokenId}`,
         `Void Sovereign Phase VII`
       ],
       description: `Forged at the intersection of on-chain digital craftsmanship and generative cybernetics. This asset commands high-frequency luminescence and immutable decentralized provenance, embodying the vanguard of digital aesthetics.`,
@@ -57,7 +58,7 @@ export async function requestAIMetadata(params: GenerateMetadataParams): Promise
       category: 'art',
       suggestedRoyalty: 7.5,
       suggestedPrice: 0.08,
-      unlockableLore: `Decryption Token: NEXUS-${randomId}-AURORA\nMaster 8K lossless render package and VIP Discord channel access unlocked for verified token holders.`,
+      unlockableLore: `Decryption Token: NEXUS-${fallbackTokenId}-AURORA\nMaster 8K lossless render package and VIP Discord channel access unlocked for verified token holders.`,
       tags: ['#Cyberpunk', '#Generative', '#CrossChain', '#MythicTier', '#Nexus'],
       visualAnalysis: {
         dominantColors: ['Cyber Cyan', 'Electric Violet', 'Obsidian Slate'],
@@ -137,6 +138,7 @@ export interface SuggestTraitsParams {
   styleHint?: string;
   userNotes?: string;
   focusArea?: string;
+  tokenId?: string | number;
 }
 
 export interface SuggestTraitsResult {
@@ -191,6 +193,7 @@ export async function requestAITraitsFromImage(params: SuggestTraitsParams): Pro
     };
   } catch (err: any) {
     console.warn('AI trait analysis notice, using fallback synthesis:', err);
+    const suggestedId = params.tokenId !== undefined ? String(params.tokenId).replace(/^#/, '') : '0';
     return {
       success: true,
       visualInspection: {
@@ -200,7 +203,7 @@ export async function requestAITraitsFromImage(params: SuggestTraitsParams): Pro
         artStyle: params.styleHint || 'Digital Cyber-Vector'
       },
       overallRarityTier: 'Legendary',
-      suggestedTitle: `Nexus Artifact #${Math.floor(100 + Math.random() * 900)}`,
+      suggestedTitle: `Nexus Artifact #${suggestedId}`,
       suggestedDescription: `A high-potency on-chain artifact featuring quantum-forged textures and reactive luminescence tuned to decentralized network protocols.`,
       traits: [
         {
