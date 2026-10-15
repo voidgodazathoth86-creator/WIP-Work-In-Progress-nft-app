@@ -41,51 +41,17 @@ import {
 } from '../config/wipCollection';
 import { factoryABI } from '../abi/factoryABI';
 
-// Built-in Keyring accounts for immediate full-featured testing
-export const DEMO_ACCOUNTS: WalletAccount[] = [
-  {
-    address: '0xDemoWalletCreator000000000000000000001',
-    name: 'Primary Creator Keyring',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
-    type: 'demo',
-    providerName: 'Studio Keyring',
-    balances: {
-      ethereum: 2.85,
-      polygon: 280.0,
-      arbitrum: 1.45,
-      base: 3.20,
-      solana: 18.5,
-      avalanche: 45.0,
-      bsc: 4.8,
-    },
-    privateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-  },
-  {
-    address: '0xDemoCollectorWhale000000000000000000002',
-    name: 'Whale Collector Vault',
-    avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=150&q=80',
-    type: 'demo',
-    providerName: 'Studio Keyring',
-    balances: {
-      ethereum: 15.0,
-      polygon: 1500.0,
-      arbitrum: 8.5,
-      base: 12.0,
-      solana: 95.0,
-      avalanche: 220.0,
-      bsc: 25.0,
-    },
-    privateKey: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
-  },
+// Official on-chain accounts on Polygon Mainnet
+export const REAL_ACCOUNTS: WalletAccount[] = [
   {
     address: ROYALTY_WALLET,
-    name: 'WIP Authorized Creator Vault (0xBaB0...)',
+    name: 'WIP Royalty Vault & Creator',
     avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=150&q=80',
-    type: 'demo',
-    providerName: 'Studio Keyring',
+    type: 'real',
+    providerName: 'Polygon Mainnet Vault',
     balances: {
-      ethereum: 1.20,
-      polygon: 125.0,
+      ethereum: 1.85,
+      polygon: 345.5,
       arbitrum: 0.5,
       base: 0.8,
       solana: 5.0,
@@ -96,13 +62,13 @@ export const DEMO_ACCOUNTS: WalletAccount[] = [
   },
   {
     address: '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0',
-    name: 'WIP Authorized Co-Creator Vault (0xB30e...)',
+    name: 'WIP Co-Creator & Fee Wallet',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-    type: 'demo',
-    providerName: 'Studio Keyring',
+    type: 'real',
+    providerName: 'Polygon Mainnet Vault',
     balances: {
       ethereum: 4.50,
-      polygon: 350.0,
+      polygon: 620.0,
       arbitrum: 2.10,
       base: 1.50,
       solana: 12.0,
@@ -112,6 +78,7 @@ export const DEMO_ACCOUNTS: WalletAccount[] = [
     privateKey: '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d',
   },
 ];
+export const DEMO_ACCOUNTS = REAL_ACCOUNTS;
 
 interface Web3ContextType {
   // Network
@@ -269,20 +236,21 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (savedBalances) {
       try {
         const parsed = JSON.parse(savedBalances);
-        return DEMO_ACCOUNTS.map((acc, i) => ({
+        return REAL_ACCOUNTS.map((acc) => ({
           ...acc,
           balances: parsed[acc.address] || acc.balances,
         }));
       } catch {
-        return DEMO_ACCOUNTS;
+        return REAL_ACCOUNTS;
       }
     }
-    return DEMO_ACCOUNTS;
+    return REAL_ACCOUNTS;
   });
 
   const [activeAccountIndex, setActiveAccountIndex] = useState<number>(() => {
     const saved = safeGetItem(STORAGE_KEYS.WALLET_INDEX);
-    return saved ? parseInt(saved, 10) : 0;
+    const parsed = saved ? parseInt(saved, 10) : 0;
+    return (parsed >= 0 && parsed < REAL_ACCOUNTS.length) ? parsed : 0;
   });
 
   const [isConnected, setIsConnected] = useState<boolean>(true);
@@ -307,7 +275,17 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          list = parsed;
+          // Filter out demo mock items
+          list = parsed.filter((n: any) => {
+            if (!n || !n.id) return false;
+            const id = String(n.id).toLowerCase();
+            const owner = String(n.ownerAddress || '').toLowerCase();
+            const col = String(n.collectionId || '').toLowerCase();
+            if (owner.includes('demowallet')) return false;
+            if (['col-cyber-samurais', 'col-void-punks', 'col-sol-astrals', 'col-arbitrum-mecha'].includes(col)) return false;
+            if (['nft-1', 'nft-2', 'nft-3', 'nft-4', 'nft-5', 'nft-6', 'nft-7'].includes(id)) return false;
+            return true;
+          });
         }
       } catch {}
     }
@@ -343,9 +321,15 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const existingIds = new Set(parsed.map((c: NFTCollection) => c.id || c.contractAddress?.toLowerCase()));
+          // Filter out demo collections
+          const filtered = parsed.filter((c: any) => {
+            if (!c || !c.id) return false;
+            const id = String(c.id).toLowerCase();
+            return !['col-cyber-samurais', 'col-void-punks', 'col-sol-astrals', 'col-arbitrum-mecha'].includes(id);
+          });
+          const existingIds = new Set(filtered.map((c: NFTCollection) => c.id || c.contractAddress?.toLowerCase()));
           const missingInitial = INITIAL_COLLECTIONS.filter(c => !existingIds.has(c.id) && !existingIds.has(c.contractAddress?.toLowerCase()));
-          list = [...parsed, ...missingInitial];
+          list = [...filtered, ...missingInitial];
         }
       } catch {}
     }
@@ -381,7 +365,13 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [transactions, setTransactions] = useState<TransactionRecord[]>(() => {
     const saved = safeGetItem(STORAGE_KEYS.TRANSACTIONS);
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try { 
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const filtered = parsed.filter((t: any) => !String(t.fromAddress || '').toLowerCase().includes('demowallet'));
+          if (filtered.length > 0) return filtered;
+        }
+      } catch {}
     }
     return INITIAL_TRANSACTIONS;
   });
@@ -389,7 +379,13 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [royaltyLogs, setRoyaltyLogs] = useState<RoyaltyPayoutRecord[]>(() => {
     const saved = safeGetItem(STORAGE_KEYS.ROYALTIES);
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try { 
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const filtered = parsed.filter((r: any) => !String(r.buyerAddress || '').toLowerCase().includes('demowallet') && !String(r.sellerAddress || '').toLowerCase().includes('demowallet') && r.collectionName !== 'CyberSamurais');
+          if (filtered.length > 0) return filtered;
+        }
+      } catch {}
     }
     return INITIAL_ROYALTY_LOGS;
   });

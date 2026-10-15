@@ -17,10 +17,14 @@ import {
   History, 
   FolderPlus,
   PlusCircle,
-  ArrowLeftRight
+  ArrowLeftRight,
+  RefreshCw,
+  Copy,
+  Check
 } from 'lucide-react';
 import { SUPPORTED_CHAINS } from '../data/chains';
 import { formatCrypto, formatUsd } from '../services/gasService';
+import { WIP_COLLECTION, WIP_LOGO_COLLECTION, COLLECTION_FACTORY_1000, ROYALTY_WALLET } from '../config/wipCollection';
 
 interface DashboardProps {
   onSelectNFT: (nft: NFT) => void;
@@ -36,10 +40,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectNFT, onOpenMintStu
     royaltyLogs, 
     transactions, 
     totalPortfolioValueUsd, 
-    totalRoyaltyEarnedUsd 
+    totalRoyaltyEarnedUsd,
+    syncWipCollections,
+    isAutoSyncing
   } = useWeb3();
 
   const [activeTab, setActiveTab] = useState<'collected' | 'minted' | 'collections' | 'royalties' | 'activity'>('collected');
+  const [copiedText, setCopiedText] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  const handleCopy = (text: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedText(text);
+      setTimeout(() => setCopiedText(null), 2000);
+    }
+  };
+
+  const handleSyncOnChain = async () => {
+    setSyncStatus('Querying Polygonscan & Polygon RPC nodes...');
+    const res = await syncWipCollections(false);
+    if (res.success) {
+      setSyncStatus(`Polygon on-chain sync complete: ${res.totalWipCount} active items synchronized.`);
+    } else {
+      setSyncStatus('Synchronized with on-chain cache.');
+    }
+    setTimeout(() => setSyncStatus(null), 4000);
+  };
 
   // Filtered lists (deduplicated by NFT ID)
   const collectedNFTs = useMemo(() => {
@@ -60,7 +87,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectNFT, onOpenMintStu
       const lowerId = String(n.id).toLowerCase();
       if (seen.has(lowerId)) return false;
       seen.add(lowerId);
-      return n.creatorAddress.toLowerCase() === activeAccount.address.toLowerCase();
+      return n.creatorAddress.toLowerCase() === activeAccount.address.toLowerCase() ||
+             n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase();
     });
   }, [nfts, activeAccount.address]);
 
@@ -83,37 +111,74 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectNFT, onOpenMintStu
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl sm:text-2xl font-black text-zinc-100">{activeAccount.name}</h1>
-                <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 text-[10px] font-bold">
-                  {activeAccount.providerName}
+                <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 text-[10px] font-bold flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                  Polygon Mainnet
                 </span>
               </div>
-              <div className="text-xs font-mono text-zinc-400 mt-0.5 flex items-center gap-1.5">
-                <span>{activeAccount.address}</span>
+              <div className="text-xs font-mono text-zinc-400 mt-1 flex flex-wrap items-center gap-2">
+                <span className="bg-zinc-950/80 px-2 py-0.5 rounded-md border border-zinc-800 text-zinc-300">
+                  {activeAccount.address}
+                </span>
+                <button
+                  onClick={() => handleCopy(activeAccount.address)}
+                  title="Copy address"
+                  className="p-1 hover:text-cyan-400 text-zinc-500 transition-colors"
+                >
+                  {copiedText === activeAccount.address ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <a
+                  href={`https://polygonscan.com/address/${activeAccount.address}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors"
+                >
+                  <span>Polygonscan</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {onOpenBridge && (
-              <button
-                onClick={() => onOpenBridge()}
-                id="dashboard-quick-bridge-btn"
-                className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-cyan-400 border border-cyan-500/30 text-xs font-bold transition-all flex items-center gap-2"
-              >
-                <ArrowLeftRight className="w-4 h-4" />
-                Teleport Asset
-              </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={handleSyncOnChain}
+              disabled={isAutoSyncing}
+              id="portfolio-sync-onchain-btn"
+              className="px-3.5 py-2 rounded-xl bg-zinc-800/90 hover:bg-zinc-700 text-cyan-300 border border-cyan-500/30 text-xs font-bold transition-all flex items-center gap-2 shadow-sm"
+              title="Pull latest tokens directly from Polygon RPC & Polygonscan"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin text-cyan-400' : ''}`} />
+              <span>{isAutoSyncing ? 'Syncing...' : 'Sync Polygon NFTs'}</span>
+            </button>
+
+            <a
+              href={`https://polygonscan.com/address/${WIP_COLLECTION.contractAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3.5 py-2 rounded-xl bg-zinc-800/90 hover:bg-zinc-700 text-purple-300 border border-purple-500/30 text-xs font-bold transition-all flex items-center gap-1.5"
+            >
+              <span>WIP Contract</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+
             <button
               onClick={onOpenMintStudio}
               id="dashboard-quick-mint-btn"
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-cyan-500/20 transition-all flex items-center gap-2"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-cyan-500/20 transition-all flex items-center gap-2"
             >
               <PlusCircle className="w-4 h-4" />
               Mint New NFT
             </button>
           </div>
         </div>
+
+        {syncStatus && (
+          <div className="mt-4 p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono flex items-center gap-2 animate-fadeIn">
+            <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+            {syncStatus}
+          </div>
+        )}
 
         {/* 4 Stat Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 mt-6 pt-6 border-t border-zinc-800/80">
@@ -336,8 +401,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectNFT, onOpenMintStu
                       <td className="py-3 font-mono font-bold text-emerald-400">
                         +{log.royaltyAmountCrypto} {chain.symbol} ({formatUsd(log.royaltyAmountUsd)})
                       </td>
-                      <td className="py-3 font-mono text-cyan-400 text-[11px] truncate max-w-[120px]">
-                        {log.txHash.slice(0, 10)}...
+                      <td className="py-3 font-mono text-cyan-400 text-[11px]">
+                        <a
+                          href={`https://polygonscan.com/tx/${log.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-cyan-300 inline-flex items-center gap-1 font-mono"
+                          title="View transaction on Polygonscan"
+                        >
+                          <span>{log.txHash.slice(0, 10)}...</span>
+                          <ExternalLink className="w-2.5 h-2.5 text-cyan-500" />
+                        </a>
                       </td>
                       <td className="py-3 text-right text-zinc-500 text-[11px] font-mono">
                         {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -355,29 +429,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectNFT, onOpenMintStu
       {activeTab === 'collections' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {myCollections.map(col => {
-            const chain = SUPPORTED_CHAINS[col.chainId] || SUPPORTED_CHAINS.ethereum;
+            const chain = SUPPORTED_CHAINS[col.chainId] || SUPPORTED_CHAINS.polygon;
+            const scanUrl = `https://polygonscan.com/address/${col.contractAddress}`;
             return (
-              <div key={col.id} className="rounded-2xl overflow-hidden bg-zinc-900/60 border border-zinc-800 shadow-lg flex flex-col justify-between">
+              <div key={col.id} className="rounded-2xl overflow-hidden bg-zinc-900/60 border border-zinc-800 shadow-lg flex flex-col justify-between hover:border-zinc-700 transition-all">
                 <div className="h-28 w-full relative overflow-hidden bg-zinc-950">
                   <img src={col.bannerImage} alt={col.name} className="w-full h-full object-cover" />
-                  <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-lg bg-zinc-950/80 backdrop-blur-md text-xs font-bold text-zinc-200">
-                    {chain.icon} {chain.name}
+                  <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-lg bg-zinc-950/80 backdrop-blur-md text-xs font-bold text-zinc-200 flex items-center gap-1">
+                    <span>{chain.icon}</span>
+                    <span>{chain.name}</span>
                   </div>
                 </div>
 
                 <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                  <div className="flex items-center gap-3">
-                    <img src={col.avatarImage} alt={col.name} className="w-10 h-10 rounded-xl object-cover -mt-8 ring-2 ring-zinc-950 shadow-md" />
-                    <div>
-                      <h4 className="text-sm font-bold text-zinc-100 flex items-center gap-1">
-                        {col.name}
-                        <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                      </h4>
-                      <div className="text-[10px] text-zinc-500 font-mono">{col.symbol} • {col.standard}</div>
+                  <div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <img src={col.avatarImage} alt={col.name} className="w-10 h-10 rounded-xl object-cover -mt-8 ring-2 ring-zinc-950 shadow-md" />
+                        <div>
+                          <h4 className="text-sm font-bold text-zinc-100 flex items-center gap-1">
+                            {col.name}
+                            <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                          </h4>
+                          <div className="text-[10px] text-zinc-500 font-mono">{col.symbol} • {col.standard}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-zinc-400 mt-2 line-clamp-2">{col.description}</p>
+
+                    <div className="mt-2.5 flex items-center justify-between text-[11px] font-mono text-zinc-400 bg-zinc-950/60 p-2 rounded-xl border border-zinc-800/80">
+                      <span className="truncate max-w-[180px]">{col.contractAddress}</span>
+                      <a
+                        href={scanUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-sans text-[11px] font-bold"
+                      >
+                        <span>Polygonscan</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
                     </div>
                   </div>
-
-                  <p className="text-xs text-zinc-400 line-clamp-2">{col.description}</p>
 
                   <div className="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-800 text-center text-xs">
                     <div className="p-1.5 rounded-lg bg-zinc-950">
@@ -426,7 +519,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectNFT, onOpenMintStu
                         <span>•</span>
                         <span>{chain.name}</span>
                         <span>•</span>
-                        <span className="text-cyan-400 truncate max-w-[120px]">Tx: {tx.txHash.slice(0, 12)}...</span>
+                        <a
+                          href={`https://polygonscan.com/tx/${tx.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 font-mono hover:underline"
+                          title="View on Polygonscan"
+                        >
+                          <span>Tx: {tx.txHash.slice(0, 10)}...</span>
+                          <ExternalLink className="w-2.5 h-2.5 text-cyan-500" />
+                        </a>
                       </div>
                     </div>
                   </div>

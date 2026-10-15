@@ -1102,6 +1102,22 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
               <Plus className="w-3.5 h-3.5" />
               <span>Add Row</span>
             </button>
+
+            {/* Quick Renumber from 0 in numerical order */}
+            <button
+              type="button"
+              onClick={() => {
+                setBatchItems(prev => prev.map((item, index) => ({
+                  ...item,
+                  tokenId: `#${index}`,
+                })));
+                showNotification('Renumbered all items in numerical order starting with #0!');
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-500/30 text-cyan-300 text-xs font-bold flex items-center gap-1 transition-all shrink-0 cursor-pointer"
+              title="Renumber all batch items starting with #0 in numerical order"
+            >
+              <span>#0..N Renumber</span>
+            </button>
           </div>
         </div>
 
@@ -1173,8 +1189,20 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
                         }}
                         className="w-full bg-transparent font-bold text-zinc-100 focus:outline-none focus:bg-zinc-900/80 px-1.5 py-1 rounded"
                       />
-                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-zinc-500">
-                        <span className="font-mono">Token #{String(item.rowIndex).padStart(3, '0')}</span>
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-400">
+                        <div className="flex items-center gap-1 font-mono">
+                          <span className="text-zinc-500 font-bold">Token ID:</span>
+                          <input
+                            type="text"
+                            value={item.tokenId ? String(item.tokenId) : `#${idx}`}
+                            onChange={(e) => {
+                              const val = e.target.value.trim();
+                              setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, tokenId: val ? (val.startsWith('#') ? val : `#${val}`) : undefined } : i));
+                            }}
+                            className="w-14 px-1 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-cyan-300 font-bold text-[10px] focus:outline-none focus:border-cyan-500"
+                            title="Manually adjust Token ID"
+                          />
+                        </div>
                         {item.category && (
                           <span className="px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-400 capitalize">
                             {item.category}

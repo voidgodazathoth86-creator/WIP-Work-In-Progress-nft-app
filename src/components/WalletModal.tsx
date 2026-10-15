@@ -355,10 +355,11 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, openF
                 </div>
               </div>
 
-              {/* Pre-funded Studio Keyring Accounts */}
+              {/* Verified Polygon Mainnet Vault Wallets */}
               <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                  Pre-Funded Studio Accounts
+                <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2 flex items-center justify-between">
+                  <span>Verified Polygon Mainnet Vaults</span>
+                  <span className="text-[10px] text-cyan-400 font-mono">Chain ID: 137</span>
                 </div>
                 <div className="space-y-2">
                   {DEMO_ACCOUNTS.map((acc) => {
@@ -377,11 +378,14 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, openF
                         }`}
                       >
                         <div className="flex items-center gap-3">
-                          <img src={acc.avatar} alt={acc.name} className="w-8 h-8 rounded-full object-cover" />
+                          <img src={acc.avatar} alt={acc.name} className="w-8 h-8 rounded-full object-cover ring-1 ring-cyan-500/40" />
                           <div>
-                            <div className="text-xs font-bold text-zinc-100">{acc.name}</div>
-                            <div className="text-[10px] text-zinc-400 font-mono">
-                              {acc.balances.ethereum} ETH • {acc.balances.polygon} POL • {acc.balances.solana} SOL
+                            <div className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                              <span>{acc.name}</span>
+                              <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                            </div>
+                            <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                              {acc.address.slice(0, 8)}...{acc.address.slice(-6)} • {acc.balances.polygon} POL
                             </div>
                           </div>
                         </div>
@@ -391,7 +395,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, openF
                             Active
                           </span>
                         ) : (
-                          <span className="text-[11px] font-semibold text-zinc-400">Select</span>
+                          <span className="text-[11px] font-semibold text-zinc-400 hover:text-cyan-400">Switch</span>
                         )}
                       </button>
                     );

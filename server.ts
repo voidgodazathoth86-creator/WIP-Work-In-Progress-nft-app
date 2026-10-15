@@ -1131,7 +1131,7 @@ Return JSON strictly matching this schema:
   // === GEMINI AI API: GENERATE METADATA (GEMINI 3.8 FLASH) ===
   // =========================================================================
   app.post('/api/ai/generate-metadata', async (req: Request, res: Response) => {
-    const { imageData, styleHint, tone, userContext, standard, chainName } = req.body || {};
+    const { imageData, styleHint, tone, userContext, standard, chainName, count } = req.body || {};
 
     const ai = getGeminiClient();
     if (!ai) {
@@ -1140,7 +1140,7 @@ Return JSON strictly matching this schema:
         isFallback: true,
         warning: 'Gemini API key not found. Using algorithmic NFT metadata generator.',
         metadata: {
-          name: `Vanguard Synthesis #${count || 0}`,
+          name: `Vanguard Synthesis #${count !== undefined ? count : 0}`,
           description: `Forged as an immutable on-chain token on ${chainName || 'Polygon'}. Embodying high-fidelity digital provenance and aesthetic precision.`,
           shortDescription: `Curated digital asset with verified on-chain royalty and provenance.`,
           category: 'art',
@@ -1315,8 +1315,8 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
     });
   }
 
-  // App always listens on port 3000 behind container Nginx (which listens on 8080 and proxies to 3000)
-  const PORT = 3000;
+  // Listen on PORT provided by Cloud Run or environment, defaulting to 3000 in dev
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 WIP NFT LIVE APP - Running on http://0.0.0.0:${PORT} (${isProd ? 'PRODUCTION' : 'DEVELOPMENT'})`);

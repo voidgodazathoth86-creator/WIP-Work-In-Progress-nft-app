@@ -143,8 +143,8 @@ export interface WalletAccount {
   address: string;
   name: string;
   avatar: string;
-  type: 'injected' | 'demo' | 'simulated';
-  providerName: string; // 'MetaMask' | 'Phantom' | 'Coinbase' | 'Studio Keyring'
+  type: 'injected' | 'demo' | 'simulated' | 'real' | 'vault';
+  providerName: string; // 'MetaMask' | 'Phantom' | 'Coinbase' | 'Studio Keyring' | 'Polygon Mainnet Vault'
   balances: Record<BlockchainNetwork, number>;
   privateKey?: string;
 }
