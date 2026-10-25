@@ -51,7 +51,9 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
     toggleAutoSync,
     lastSyncTimestamp,
     syncWipCollections,
-    wipTotalCount
+    wipTotalCount,
+    importOnChainCollection,
+    polygonBlockNumber
   } = useWeb3();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -69,10 +71,46 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [syncToast, setSyncToast] = useState<string | null>(null);
 
+  // Import Collection Modal State
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [importAddressInput, setImportAddressInput] = useState<string>('');
+  const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [importFeedback, setImportFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleImportCollection = async () => {
+    if (!importAddressInput || !/^0x[a-fA-F0-9]{40}$/.test(importAddressInput.trim())) {
+      setImportFeedback({ type: 'error', message: 'Please enter a valid 42-character Polygon contract address (0x...).' });
+      return;
+    }
+    setIsImporting(true);
+    setImportFeedback(null);
+    try {
+      const res = await importOnChainCollection(importAddressInput.trim());
+      if (res.success && res.collection) {
+        setImportFeedback({
+          type: 'success',
+          message: `Successfully verified and imported "${res.collection.name}" with ${res.tokensCount || 0} on-chain items!`
+        });
+        setSelectedCollectionFilter(res.collection.id);
+        setTimeout(() => {
+          setIsImportModalOpen(false);
+          setImportAddressInput('');
+          setImportFeedback(null);
+        }, 2200);
+      } else {
+        setImportFeedback({ type: 'error', message: res.error || 'Failed to import collection from Polygonscan.' });
+      }
+    } catch (e: any) {
+      setImportFeedback({ type: 'error', message: e.message || 'Error communicating with Polygon RPC.' });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleManualSync = async () => {
     const res = await syncWipCollections(false);
     if (res.success) {
-      setSyncToast(`Auto-sync complete: ${res.totalWipCount} Work In Progress & Logo items are active and visible.`);
+      setSyncToast(`Auto-sync complete: ${res.totalWipCount} on-chain collections & items verified.`);
       setTimeout(() => setSyncToast(null), 4000);
     }
   };
@@ -587,6 +625,30 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
             </button>
           </div>
 
+          {/* Polygon Block Height Badge */}
+          <a
+            href={`https://polygonscan.com/block/${polygonBlockNumber}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-2.5 py-1.5 rounded-xl bg-purple-950/40 hover:bg-purple-900/50 border border-purple-500/30 text-purple-300 hover:text-purple-100 text-xs font-mono font-semibold transition-all flex items-center gap-1.5 shadow-sm"
+            title="View latest verified Polygon block on Polygonscan"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+            <span>Block #{polygonBlockNumber.toLocaleString()}</span>
+            <ExternalLink className="w-3 h-3 text-purple-400 opacity-70" />
+          </a>
+
+          {/* Import from Polygonscan Button */}
+          <button
+            id="import-polygonscan-btn"
+            onClick={() => setIsImportModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600/20 to-cyan-600/20 hover:from-purple-600/30 hover:to-cyan-600/30 border border-purple-500/40 text-purple-200 hover:text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+            title="Import & index any ERC-721 contract from Polygonscan and on-chain RPC"
+          >
+            <Layers className="w-3.5 h-3.5 text-purple-300" />
+            <span>Import Contract</span>
+          </button>
+
           {/* Sync Now Button */}
           <button
             id="wip-manual-sync-btn"
@@ -1100,7 +1162,172 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
         onSuccessNotification={(msg) => setSuccessBanner(msg)}
       />
 
+      {/* Import On-Chain Collection Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div 
+            className="w-full max-w-lg rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 relative overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-zinc-800/80 mb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 border border-purple-500/30 flex items-center justify-center text-purple-300">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    Import On-Chain Collection
+                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      Polygon Mainnet
+                    </span>
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Query bytecode, verify ERC-721 interface & index tokens via Polygonscan
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportFeedback(null);
+                }}
+                className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="mb-4">
+              <div className="text-[11px] font-medium text-zinc-400 mb-2">Verified Contract Presets:</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setImportAddressInput('0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9')}
+                  className="px-2.5 py-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 hover:border-cyan-500/40 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-zinc-200 group-hover:text-cyan-300 truncate">Work in Progress</div>
+                  <div className="text-[10px] font-mono text-zinc-500 truncate">0xc2ea...5ef9</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setImportAddressInput('0x675fD85FbcB13CE8080DBba780424A9e571B7f46')}
+                  className="px-2.5 py-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 hover:border-purple-500/40 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-zinc-200 group-hover:text-purple-300 truncate">WIP Logo (1/1)</div>
+                  <div className="text-[10px] font-mono text-zinc-500 truncate">0x675f...7f46</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setImportAddressInput('0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37')}
+                  className="px-2.5 py-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 hover:border-indigo-500/40 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-zinc-200 group-hover:text-indigo-300 truncate">Factory 1/1000</div>
+                  <div className="text-[10px] font-mono text-zinc-500 truncate">0x663D...2e37</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Address Input */}
+            <div className="space-y-2 mb-4">
+              <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
+                <span>Contract Address (0x...)</span>
+                {importAddressInput && (
+                  <a
+                    href={`https://polygonscan.com/address/${importAddressInput}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 font-normal"
+                  >
+                    View on Polygonscan
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={importAddressInput}
+                  onChange={(e) => setImportAddressInput(e.target.value)}
+                  placeholder="e.g. 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9"
+                  className="w-full px-4 py-3 rounded-2xl bg-zinc-900 border border-zinc-800 text-sm font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
+                />
+                {importAddressInput && (
+                  <button
+                    type="button"
+                    onClick={() => setImportAddressInput('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                Supports standard ERC-721 and EIP-1167 proxy collections on Polygon (Chain ID: 137).
+              </p>
+            </div>
+
+            {/* Feedback notification */}
+            {importFeedback && (
+              <div
+                className={`p-3.5 rounded-2xl text-xs font-medium mb-4 flex items-start gap-2.5 ${
+                  importFeedback.type === 'success'
+                    ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-200'
+                    : 'bg-rose-950/40 border border-rose-500/40 text-rose-200'
+                }`}
+              >
+                {importFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <X className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                )}
+                <span>{importFeedback.message}</span>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800/80">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportFeedback(null);
+                }}
+                disabled={isImporting}
+                className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                id="verify-import-submit-btn"
+                onClick={handleImportCollection}
+                disabled={isImporting || !importAddressInput.trim()}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 disabled:opacity-50 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-purple-900/20"
+              >
+                {isImporting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Querying On-Chain State...</span>
+                  </>
+                ) : (
+                  <>
+                    <Layers className="w-4 h-4" />
+                    <span>Verify & Import Collection</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
+
 

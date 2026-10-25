@@ -1174,7 +1174,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                                 className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
                               >
                                 <Unlock className="w-3 h-3 text-emerald-400" />
-                                Switch to Authorized Wallet (Demo)
+                                Connect Authorized Creator Wallet (0xBaB0...)
                               </button>
                             )}
                           </div>

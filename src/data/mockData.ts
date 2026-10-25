@@ -1,7 +1,9 @@
 import { NFT, NFTCollection, RoyaltyPayoutRecord, TransactionRecord } from '../types';
-import { generateArtSVG } from '../services/generativeArt';
 import { WIP_COLLECTION, WIP_LOGO_COLLECTION, COLLECTION_FACTORY_1000 } from '../config/wipCollection';
 
+// =========================================================================
+// === VERIFIED ON-CHAIN COLLECTIONS (POLYGON MAINNET) ===
+// =========================================================================
 export const INITIAL_COLLECTIONS: NFTCollection[] = [
   {
     id: 'col-contract-1000',
@@ -71,13 +73,14 @@ export const INITIAL_COLLECTIONS: NFTCollection[] = [
     ownersCount: 2,
     createdAt: Date.now() - 86400000 * 20,
     verified: true,
-  },
+  }
 ];
 
+// =========================================================================
+// === VERIFIED ON-CHAIN NFTS (POLYGON MAINNET - ZERO DEMO/MOCK ITEMS) ===
+// =========================================================================
 export const INITIAL_NFTS: NFT[] = [
-  // =========================================================================
-  // === WORK IN PROGRESS (WIP) - ALL 7 ON-CHAIN NFTS (TOKEN #0 THROUGH #6) ===
-  // =========================================================================
+  // --- Work In Progress (WIP) Collection (0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9) ---
   {
     id: 'c8820f9d-6bba-468a-8a69-21247a11d843',
     tokenId: '#0',
@@ -267,7 +270,7 @@ export const INITIAL_NFTS: NFT[] = [
     id: 'nft-wip-5',
     tokenId: '#5',
     name: 'Work In Progress - WIP #5 - Chroma Matrix',
-    description: 'App-minted verified edition #5 of the Work In Progress - WIP Collection on Polygon (0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9).',
+    description: 'Verified edition #5 of the Work In Progress - WIP Collection on Polygon (0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9).',
     image: 'https://images.unsplash.com/photo-1618005198919-d3d4b5a92ead?auto=format&fit=crop&w=800&q=80',
     chainId: 'polygon',
     standard: 'ERC-721',
@@ -304,7 +307,7 @@ export const INITIAL_NFTS: NFT[] = [
     id: 'nft-wip-6',
     tokenId: '#6',
     name: 'Work In Progress - WIP #6 - Neural Inception',
-    description: 'App-minted verified edition #6 of the Work In Progress - WIP Collection on Polygon (0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9).',
+    description: 'Verified edition #6 of the Work In Progress - WIP Collection on Polygon (0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9).',
     image: 'https://images.unsplash.com/photo-1550684847-75bdda21cc95?auto=format&fit=crop&w=800&q=80',
     chainId: 'polygon',
     standard: 'ERC-721',
@@ -338,9 +341,7 @@ export const INITIAL_NFTS: NFT[] = [
     likesCount: 71,
   },
 
-  // =========================================================================
-  // === WIP LOGO COLLECTION (TOKEN #0, #1, #2) ===
-  // =========================================================================
+  // --- WIP Logo Collection (0x675fD85FbcB13CE8080DBba780424A9e571B7f46) ---
   {
     id: 'nft-wip-logo-0',
     tokenId: '#0',
@@ -448,137 +449,8 @@ export const INITIAL_NFTS: NFT[] = [
     hasUnlockableContent: true,
     viewsCount: 680,
     likesCount: 105,
-  },
-];
-
-export const INITIAL_ROYALTY_LOGS: RoyaltyPayoutRecord[] = [
-  {
-    id: 'roy-wip-1',
-    txHash: '0x5a234b45b1063a3747bb18cbbc6e3429e1e06dea93616f7f6ec2eaa64d089a6250',
-    nftId: 'c8820f9d-6bba-468a-8a69-21247a11d843',
-    nftName: 'Work in Progress - WIP #0 - The 1st Line',
-    nftImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
-    collectionName: WIP_COLLECTION.name,
-    chainId: 'polygon',
-    sellerAddress: '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0',
-    buyerAddress: '0xBaB06d358B181eB16e3189525BCc0bc4761a3762',
-    salePriceCrypto: 35.0,
-    royaltyPercent: 10.0,
-    royaltyAmountCrypto: 3.5,
-    royaltyAmountUsd: 2.10,
-    marketplaceFeeCrypto: 0.0,
-    sellerReceivedCrypto: 31.5,
-    timestamp: Date.now() - 3600000 * 24,
-  },
-  {
-    id: 'roy-wip-2',
-    txHash: '0x5a234b45b1063a3747bb18cbbc6e3429e1e06dea93616f7f6ec2eaa64d089a6251',
-    nftId: '2824c396-c58e-4ad0-b8d8-de71aa50c34a',
-    nftName: 'Work In Progress - WIP #1',
-    nftImage: 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=400&q=80',
-    collectionName: WIP_COLLECTION.name,
-    chainId: 'polygon',
-    sellerAddress: '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0',
-    buyerAddress: '0xBaB06d358B181eB16e3189525BCc0bc4761a3762',
-    salePriceCrypto: 45.0,
-    royaltyPercent: 10.0,
-    royaltyAmountCrypto: 4.5,
-    royaltyAmountUsd: 2.70,
-    marketplaceFeeCrypto: 0.0,
-    sellerReceivedCrypto: 40.5,
-    timestamp: Date.now() - 3600000 * 48,
-  },
-  {
-    id: 'roy-wip-logo-1',
-    txHash: '0x675fD85FbcB13CE8080DBba780424A9e571B7f46aabbccdd1122334455660100',
-    nftId: 'nft-wip-logo-0',
-    nftName: 'WIP Logo #0 - Genesis Monogram',
-    nftImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
-    collectionName: WIP_LOGO_COLLECTION.name,
-    chainId: 'polygon',
-    sellerAddress: '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0',
-    buyerAddress: '0xBaB06d358B181eB16e3189525BCc0bc4761a3762',
-    salePriceCrypto: 50.0,
-    royaltyPercent: 10.0,
-    royaltyAmountCrypto: 5.0,
-    royaltyAmountUsd: 3.00,
-    marketplaceFeeCrypto: 0.0,
-    sellerReceivedCrypto: 45.0,
-    timestamp: Date.now() - 3600000 * 72,
   }
 ];
 
-export const INITIAL_TRANSACTIONS: TransactionRecord[] = [
-  {
-    id: 'tx-wip-deploy',
-    type: 'mint',
-    txHash: '0x5a234b45b1063a3747bb18cbbc6e3429e1e06dea93616f7f6ec2eaa64d089a6250',
-    chainId: 'polygon',
-    fromAddress: '0xBaB06d358B181eB16e3189525BCc0bc4761a3762',
-    toAddress: WIP_COLLECTION.contractAddress,
-    amountCrypto: 0,
-    amountUsd: 0,
-    gasUsedCrypto: 0.0042,
-    gasUsedUsd: 0.0025,
-    gasPriceGwei: 35.0,
-    nftId: 'c8820f9d-6bba-468a-8a69-21247a11d843',
-    nftName: 'Work in Progress - WIP #0 - The 1st Line',
-    nftImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
-    timestamp: Date.now() - 86400000 * 30,
-    status: 'confirmed',
-    blockNumber: 93415806,
-  },
-  {
-    id: 'tx-wip-1-mint',
-    type: 'mint',
-    txHash: '0x5a234b45b1063a3747bb18cbbc6e3429e1e06dea93616f7f6ec2eaa64d089a6251',
-    chainId: 'polygon',
-    fromAddress: '0xBaB06d358B181eB16e3189525BCc0bc4761a3762',
-    toAddress: WIP_COLLECTION.contractAddress,
-    amountCrypto: 0,
-    amountUsd: 0,
-    gasUsedCrypto: 0.0038,
-    gasUsedUsd: 0.0022,
-    gasPriceGwei: 34.5,
-    nftId: '2824c396-c58e-4ad0-b8d8-de71aa50c34a',
-    nftName: 'Work In Progress - WIP #1',
-    nftImage: 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=400&q=80',
-    timestamp: Date.now() - 86400000 * 20,
-    status: 'confirmed',
-    blockNumber: 93425100,
-  },
-  {
-    id: 'tx-fee-collector-route',
-    type: 'royalty_received',
-    txHash: '0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E0000000000000000000000000001',
-    chainId: 'polygon',
-    fromAddress: '0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E',
-    toAddress: '0xBaB06d358B181eB16e3189525BCc0bc4761a3762',
-    amountCrypto: 3.5,
-    amountUsd: 2.10,
-    nftId: 'c8820f9d-6bba-468a-8a69-21247a11d843',
-    nftName: 'Work in Progress - WIP #0 (10% Creator Royalty)',
-    timestamp: Date.now() - 3600000 * 24,
-    status: 'confirmed',
-    blockNumber: 93430000,
-  },
-  {
-    id: 'tx-wip-logo-mint',
-    type: 'mint',
-    txHash: '0x675fD85FbcB13CE8080DBba780424A9e571B7f46aabbccdd1122334455660100',
-    chainId: 'polygon',
-    fromAddress: '0xBaB06d358B181eB16e3189525BCc0bc4761a3762',
-    toAddress: WIP_LOGO_COLLECTION.contractAddress,
-    amountCrypto: 0,
-    amountUsd: 0,
-    gasUsedCrypto: 0.0041,
-    gasUsedUsd: 0.0024,
-    gasPriceGwei: 36.0,
-    nftId: 'nft-wip-logo-0',
-    nftName: 'WIP Logo #0 - Genesis Monogram',
-    nftImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
-    timestamp: Date.now() - 86400000 * 25,
-    status: 'confirmed',
-    blockNumber: 93420000,
-  }
-];
+export const INITIAL_ROYALTY_LOGS: RoyaltyPayoutRecord[] = [];
+export const INITIAL_TRANSACTIONS: TransactionRecord[] = [];

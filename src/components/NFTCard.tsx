@@ -3,7 +3,7 @@ import { NFT } from '../types';
 import { useWeb3 } from '../context/Web3Context';
 import { SUPPORTED_CHAINS } from '../data/chains';
 import { formatCrypto, formatUsd } from '../services/gasService';
-import { Heart, Sparkles, ShoppingCart, Percent, Eye, ShieldCheck } from 'lucide-react';
+import { Heart, Sparkles, ShoppingCart, Percent, Eye, ShieldCheck, ExternalLink } from 'lucide-react';
 
 interface NFTCardProps {
   nft: NFT;
@@ -94,6 +94,27 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
             {nft.name}
           </h4>
         </div>
+
+        {/* On-Chain Polygonscan Explorer Link */}
+        {nft.contractAddress && (
+          <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+            <span className="flex items-center gap-1 text-emerald-400 font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              On-Chain Verified
+            </span>
+            <a
+              href={`https://polygonscan.com/token/${nft.contractAddress}?a=${String(nft.tokenId || '0').replace(/^#/, '')}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-zinc-400 hover:text-cyan-400 transition-colors flex items-center gap-0.5 group/link"
+              title="Verify token metadata & provenance on Polygonscan"
+            >
+              <span>Polygonscan</span>
+              <ExternalLink className="w-2.5 h-2.5 group-hover/link:translate-x-0.5 transition-transform" />
+            </a>
+          </div>
+        )}
 
         {/* Pricing / Listing Status & Action Button */}
         <div className="pt-2 border-t border-zinc-800/80 flex items-end justify-between">

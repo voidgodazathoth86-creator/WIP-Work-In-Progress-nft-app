@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useWeb3, DEMO_ACCOUNTS } from '../context/Web3Context';
+import { useWeb3, AUTHORIZED_ACCOUNTS } from '../context/Web3Context';
 import { 
   X, 
   Wallet, 
@@ -15,7 +15,8 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Coins
+  Coins,
+  Search
 } from 'lucide-react';
 import { formatCrypto, formatUsd } from '../services/gasService';
 import { SUPPORTED_CHAINS } from '../data/chains';
@@ -32,7 +33,8 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, openF
     activeAccount, 
     allAccounts, 
     connectInjectedWallet, 
-    connectDemoAccount, 
+    connectAccount, 
+    connectPublicAddress,
     disconnectWallet, 
     activeChain, 
     currentChainConfig, 
@@ -45,6 +47,8 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, openF
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'profile' | 'connect' | 'balances'>('profile');
   const [connectNotification, setConnectNotification] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
+  const [customAddress, setCustomAddress] = useState('');
+  const [addressError, setAddressError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -355,49 +359,111 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, openF
                 </div>
               </div>
 
-              {/* Verified Polygon Mainnet Vault Wallets */}
-              <div>
+              {/* Watcher / Custom Address Mode */}
+              <div className="pt-2">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2 flex items-center justify-between">
-                  <span>Verified Polygon Mainnet Vaults</span>
-                  <span className="text-[10px] text-cyan-400 font-mono">Chain ID: 137</span>
+                  <span>Custom Address Watcher</span>
+                  <span className="text-[10px] text-cyan-400 font-mono">Polygon Mainnet</span>
+                </div>
+                <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={customAddress}
+                      onChange={(e) => {
+                        setCustomAddress(e.target.value);
+                        setAddressError(null);
+                      }}
+                      placeholder="0x... (e.g. your personal Polygon address)"
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!customAddress || !/^0x[a-fA-F0-9]{40}$/.test(customAddress.trim())) {
+                          setAddressError('Invalid address. Must be a 42-char 0x address.');
+                          return;
+                        }
+                        try {
+                          connectPublicAddress(customAddress.trim());
+                          onClose();
+                        } catch (err: any) {
+                          setAddressError(err.message || 'Failed to watch address');
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-bold text-xs rounded-lg transition-all shrink-0 cursor-pointer"
+                    >
+                      Watch
+                    </button>
+                  </div>
+                  {addressError && (
+                    <div className="text-[10px] text-rose-400 font-medium">{addressError}</div>
+                  )}
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">
+                    Enter any public Polygon address to inspect on-chain inventory, royalty logs, and token provenance in read-only watcher mode.
+                  </p>
+                </div>
+              </div>
+
+              {/* Authorized On-Chain Creator Accounts */}
+              <div className="pt-2">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2 flex items-center justify-between">
+                  <span>Authorized Contract Creators</span>
+                  <span className="text-[10px] text-emerald-400 font-mono">Verified On-Chain</span>
                 </div>
                 <div className="space-y-2">
-                  {DEMO_ACCOUNTS.map((acc) => {
-                    const isSelected = activeAccount.address === acc.address;
+                  {AUTHORIZED_ACCOUNTS.map((acc) => {
+                    const isSelected = activeAccount.address.toLowerCase() === acc.address.toLowerCase();
                     return (
-                      <button
+                      <div
                         key={acc.address}
-                        onClick={() => {
-                          connectDemoAccount(acc);
-                          onClose();
-                        }}
                         className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left ${
                           isSelected
-                            ? 'bg-zinc-850 border-cyan-500/50'
+                            ? 'bg-zinc-850 border-emerald-500/50'
                             : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
                         }`}
                       >
                         <div className="flex items-center gap-3">
-                          <img src={acc.avatar} alt={acc.name} className="w-8 h-8 rounded-full object-cover ring-1 ring-cyan-500/40" />
+                          <img src={acc.avatar} alt={acc.name} className="w-8 h-8 rounded-full object-cover" />
                           <div>
                             <div className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
-                              <span>{acc.name}</span>
-                              <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                              {acc.name}
+                              <a
+                                href={`https://polygonscan.com/address/${acc.address}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-zinc-500 hover:text-cyan-400 transition-colors"
+                                title="View on Polygonscan"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
                             </div>
-                            <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
-                              {acc.address.slice(0, 8)}...{acc.address.slice(-6)} • {acc.balances.polygon} POL
+                            <div className="text-[10px] text-zinc-400 font-mono">
+                              {acc.address.slice(0, 10)}...{acc.address.slice(-6)} • {acc.balances.polygon} POL
                             </div>
                           </div>
                         </div>
-                        {isSelected ? (
-                          <span className="text-[11px] font-bold text-cyan-400 flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Active
-                          </span>
-                        ) : (
-                          <span className="text-[11px] font-semibold text-zinc-400 hover:text-cyan-400">Switch</span>
-                        )}
-                      </button>
+                        <div className="flex items-center gap-2">
+                          {isSelected ? (
+                            <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Active
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                connectAccount(acc);
+                                onClose();
+                              }}
+                              className="px-2.5 py-1 text-[11px] font-semibold text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg border border-zinc-700 transition-colors cursor-pointer"
+                            >
+                              Select
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
