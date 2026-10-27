@@ -1000,22 +1000,6 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
               )}
             </div>
           </div>
-
-          {/* Balance Warning / Faucet */}
-          {!hasSufficientBalance && (
-            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>Low balance ({currentWalletBalance.toFixed(4)} {currentChainConfig.symbol})</span>
-              </div>
-              <button
-                onClick={() => claimFaucetTokens(activeChain)}
-                className="px-2.5 py-1 rounded-lg bg-amber-500 text-black font-bold text-[10px] hover:bg-amber-400 transition-all cursor-pointer"
-              >
-                + Claim Faucet
-              </button>
-            </div>
-          )}
         </div>
 
       </div>
@@ -1191,17 +1175,8 @@ export const BulkMintStudio: React.FC<BulkMintStudioProps> = ({
                       />
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-400">
                         <div className="flex items-center gap-1 font-mono">
-                          <span className="text-zinc-500 font-bold">Token ID:</span>
-                          <input
-                            type="text"
-                            value={item.tokenId ? String(item.tokenId) : `#${idx}`}
-                            onChange={(e) => {
-                              const val = e.target.value.trim();
-                              setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, tokenId: val ? (val.startsWith('#') ? val : `#${val}`) : undefined } : i));
-                            }}
-                            className="w-14 px-1 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-cyan-300 font-bold text-[10px] focus:outline-none focus:border-cyan-500"
-                            title="Manually adjust Token ID"
-                          />
+                          <span className="text-zinc-500 font-bold">Mint order:</span>
+                          <span className="text-cyan-300 font-bold">{idx + 1}</span>
                         </div>
                         {item.category && (
                           <span className="px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-400 capitalize">

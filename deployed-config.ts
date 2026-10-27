@@ -5,7 +5,6 @@ export const DEPLOYED_FEE_COLLECTOR = {
   address: "0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E",
   chain: "polygon",
   block: 93415806,
-  txHash: "0x5a2...b45b1",
   feeWallet: "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0",
   royaltyWallet: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762",
   usdc: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3352",
@@ -35,8 +34,8 @@ export const SITE_LINKS = {
 };
 
 export const ON_CHAIN_STATE = {
-  WIP: { address: "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9", totalSupply: 5, nextId: 5, nextPadded: "05", name: "Work-In-Progress-NFTs", symbol: "WIP" },
-  LOGO: { address: "0x675fD85FbcB13CE8080DBba780424A9e571B7f46", totalSupply: 0, nextId: 0, type: "token 1/1" }
+  WIP: { address: "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9", totalSupply: 5, maxSupply: 1000, nextId: 5, nextPadded: "05", name: "Work-In-Progress-NFTs", symbol: "WIP" },
+  LOGO: { address: "0x675fD85FbcB13CE8080DBba780424A9e571B7f46", totalSupply: 0, maxSupply: 1000, nextId: 0, name: "WIP Logo Collection", symbol: "WIPLOGO" }
 };
 
 export const WIP_COLLECTION = "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9";
@@ -45,7 +44,7 @@ export const LOGO_COLLECTION = "0x675fD85FbcB13CE8080DBba780424A9e571B7f46";
 export const FACTORIES = {
   WIP_FACTORY: "0xf685aB23b69364AaF5Eae3C6e6cA2ff53E69E097",
   COLLECTION_FACTORY: "0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37"
-}
+} as const;
 
 export const COLLECTION_DROPDOWN_OPTIONS = [
   {
@@ -64,7 +63,7 @@ export const COLLECTION_DROPDOWN_OPTIONS = [
     symbol: "WIP",
     type: "collection",
     canMintTo: true,
-    supply: `${ON_CHAIN_STATE.WIP.totalSupply}/1000 — Next: #${ON_CHAIN_STATE.WIP.nextPadded} (Manual ID)`,
+    supply: `${ON_CHAIN_STATE.WIP.totalSupply}/${ON_CHAIN_STATE.WIP.maxSupply} — Next: #${ON_CHAIN_STATE.WIP.nextPadded} (Manual Jump)`,
     nextId: ON_CHAIN_STATE.WIP.nextId,
     manualId: true
   },
@@ -75,8 +74,7 @@ export const COLLECTION_DROPDOWN_OPTIONS = [
     symbol: "LOGO",
     type: "token",
     canMintTo: true,
-    supply: "0/1 — Token Contract 1/1",
-    note: "For 1/1000 Logo collection, deploy new via Collection Factory"
+    supply: `${ON_CHAIN_STATE.LOGO.totalSupply}/${ON_CHAIN_STATE.LOGO.maxSupply} — Collection (1/1000)`,
   }
 ]
 
@@ -88,7 +86,7 @@ export const COLLECTIONS_LIST = [
     symbol: "WIP",
     type: "collection",
     canMintTo: true,
-    supply: `${ON_CHAIN_STATE.WIP.totalSupply}/1000`,
+    supply: `${ON_CHAIN_STATE.WIP.totalSupply}/${ON_CHAIN_STATE.WIP.maxSupply}`,
     nextId: ON_CHAIN_STATE.WIP.nextId
   },
   {
@@ -96,9 +94,9 @@ export const COLLECTIONS_LIST = [
     address: LOGO_COLLECTION,
     name: "Logo",
     symbol: "LOGO",
-    type: "token",
+    type: "collection",
     canMintTo: true,
-    supply: "0/1"
+    supply: `${ON_CHAIN_STATE.LOGO.totalSupply}/${ON_CHAIN_STATE.LOGO.maxSupply}`
   }
 ]
 

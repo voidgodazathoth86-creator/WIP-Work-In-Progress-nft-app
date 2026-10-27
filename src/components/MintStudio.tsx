@@ -37,7 +37,6 @@ import {
 import { generateArtSVG, generateSeedAttributes, GenerativeStyle } from '../services/generativeArt';
 import { NFTTrait, BlockchainNetwork, TokenStandard, NFT, NFTCollection } from '../types';
 import { SUPPORTED_CHAINS } from '../data/chains';
-import { formatCrypto, formatUsd } from '../services/gasService';
 import { generateSolidityContract } from '../services/contractGenerator';
 import { AIMetadataCopilot } from './AIMetadataCopilot';
 import { AITraitGeneratorModal } from './AITraitGeneratorModal';
@@ -45,11 +44,12 @@ import { requestAICollectionBranding } from '../services/aiMetadataService';
 import { BulkMintStudio } from './BulkMintStudio';
 import { BulkMetadataUploadModal, ParsedAssetItem } from './BulkMetadataUploadModal';
 import { processRawSpreadsheetData } from '../services/spreadsheetService';
-import { NetworkSelectorDropdown } from './NetworkSelectorDropdown';
 import { 
   WIP_COLLECTION, 
   WIP_LOGO_COLLECTION, 
   COLLECTION_FACTORY_1000,
+  WIP_FACTORY,
+  ROYALTY_WALLET,
   WIP_AUTHORIZED_MINTERS,
   isAuthorizedWipMinter
 } from '../config/wipCollection';
@@ -67,9 +67,6 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
     currentChainConfig, 
     allChains, 
     switchChain, 
-    gasData, 
-    selectedGasSpeed, 
-    setSelectedGasSpeed,
     activeAccount, 
     activeBalance,
     collections, 
@@ -91,7 +88,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
   const [generativeStyle, setGenerativeStyle] = useState<GenerativeStyle>('cyberpunk');
   const [generativeSeed, setGenerativeSeed] = useState(`CyberNFT-${Date.now()}`);
   const [uploadedImageUrl, setUploadedImageUrl] = useState('');
-  const [collectionId, setCollectionId] = useState('col-contract-1000');
+  const [collectionId, setCollectionId] = useState('col-wip-polygon');
   const [copiedContractAddress, setCopiedContractAddress] = useState(false);
   const [tokenStandard, setTokenStandard] = useState<TokenStandard>('ERC-721');
   const [royaltyPercentage, setRoyaltyPercentage] = useState<number>(10.0);
@@ -101,9 +98,6 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
   const [hasUnlockable, setHasUnlockable] = useState(false);
   const [unlockableContent, setUnlockableContent] = useState('');
 
-  // Manual / Sequential Token ID Selection
-  const [isManualTokenId, setIsManualTokenId] = useState(false);
-  const [manualTokenId, setManualTokenId] = useState('');
 
   const selectedCol = collections.find(c => c.id === collectionId) ||
     (collectionId === 'col-contract-1000' || collectionId === 'col-wip-1000' || collectionId === COLLECTION_FACTORY_1000.contractAddress ? collections.find(c => c.id === 'col-contract-1000' || c.contractAddress.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase()) : undefined) ||
@@ -139,26 +133,11 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
 
   // Next available sequential Token ID starting at zero for new collections
   const suggestedNextTokenId = useMemo(() => {
-    let seq = 0;
-    while (usedTokenIds.numSet.has(seq)) {
-      seq++;
-    }
-    return String(seq);
-  }, [usedTokenIds]);
+    const nextFromIndexedTokens = usedTokenIds.numSet.size ? Math.max(...usedTokenIds.numSet) + 1 : 0;
+    return String(Math.max(selectedCol?.currentSupply || 0, nextFromIndexedTokens));
+  }, [usedTokenIds, selectedCol]);
 
-  // Effective token ID
-  const effectiveTokenId = isManualTokenId && manualTokenId.trim() !== ''
-    ? manualTokenId.trim().replace(/^#/, '')
-    : suggestedNextTokenId;
-
-  const formattedTokenId = `#${effectiveTokenId}`;
-
-  // Collision detection
-  const isTokenIdColliding = useMemo(() => {
-    if (!isManualTokenId || !manualTokenId.trim()) return false;
-    const clean = manualTokenId.trim().replace(/^#/, '').toLowerCase();
-    return usedTokenIds.strSet.has(clean);
-  }, [isManualTokenId, manualTokenId, usedTokenIds]);
+  const formattedTokenId = `#${suggestedNextTokenId}`;
 
   // WIP Lock & Access Control
   const isSelectedWipOrLogo = 
@@ -220,7 +199,8 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
   const [contractSymbol, setContractSymbol] = useState('');
   const [contractDescription, setContractDescription] = useState('');
   const [contractCategory, setContractCategory] = useState<'art' | 'gaming' | 'pfp' | 'photography' | 'music' | 'metaverse' | 'utility'>('art');
-  const [contractMaxSupply, setContractMaxSupply] = useState<number>(3333);
+  const [contractMaxSupply, setContractMaxSupply] = useState<number>(1000);
+  const [collectionFactoryType, setCollectionFactoryType] = useState<'collection' | 'wip'>('collection');
   const [contractMintPrice, setContractMintPrice] = useState<number>(0.05);
   const [contractMaxPerWallet, setContractMaxPerWallet] = useState<number>(5);
   const [contractBaseUri, setContractBaseUri] = useState('ipfs://QmNexusGenesisCollection/');
@@ -229,7 +209,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
   
   // Royalty Configuration for Deploy Contract
   const [contractRoyalty, setContractRoyalty] = useState<number>(7.5);
-  const [contractRoyaltyPayoutAddress, setContractRoyaltyPayoutAddress] = useState(activeAccount.address);
+  const [contractRoyaltyPayoutAddress, setContractRoyaltyPayoutAddress] = useState(ROYALTY_WALLET);
   const [contractIsBurnable, setContractIsBurnable] = useState(true);
   const [contractIsPausable, setContractIsPausable] = useState(true);
   const [contractEnforceOperatorFilter, setContractEnforceOperatorFilter] = useState(true);
@@ -421,14 +401,10 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
     setErrorMessage(null);
     setExecutionType('mint');
     setIsExecuting(true);
-    setExecutionStep(1); // IPFS Hashing
+    setExecutionStep(1); // Prepare on-chain metadata
 
     try {
-      await new Promise(r => setTimeout(r, 800));
-      setExecutionStep(2); // Wallet Signature
-
-      await new Promise(r => setTimeout(r, 1000));
-      setExecutionStep(3); // Mempool Broadcast & Gas
+      setExecutionStep(2); // Wallet confirmation
 
       const priceVal = isInstantList && listPrice ? parseFloat(listPrice) : undefined;
       const targetChainToMint = selectedCol ? selectedCol.chainId : activeChain;
@@ -448,7 +424,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
         price: priceVal,
         traits,
         unlockableContent: hasUnlockable ? unlockableContent : undefined,
-      }, selectedGasSpeed);
+      }, undefined, () => setExecutionStep(3));
 
       if (!result.success || !result.nft) {
         setErrorMessage(result.error || 'Failed to mint NFT');
@@ -484,14 +460,10 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
     setErrorMessage(null);
     setExecutionType('deploy');
     setIsExecuting(true);
-    setExecutionStep(1); // Compiling Solidity & Bytecode
+    setExecutionStep(1); // Prepare factory call
 
     try {
-      await new Promise(r => setTimeout(r, 900));
-      setExecutionStep(2); // Requesting EIP-712 Deployer Signature
-
-      await new Promise(r => setTimeout(r, 1200));
-      setExecutionStep(3); // Broadcasting Bytecode to Mempool
+      setExecutionStep(2); // Wallet confirmation
 
       const result = await deployCollection({
         name: contractName,
@@ -502,10 +474,10 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
         avatarImage: contractAvatarUrl,
         chainId: activeChain,
         standard: contractStandard,
-        maxSupply: contractMaxSupply,
+        maxSupply: collectionFactoryType === 'collection' ? 1000 : 0,
         royaltyPercentage: contractRoyalty,
         royaltyPayoutAddress: contractRoyaltyPayoutAddress || activeAccount.address,
-      });
+      }, () => setExecutionStep(3), collectionFactoryType);
 
       if (!result.success || !result.collection) {
         setErrorMessage(result.error || 'Smart contract deployment failed');
@@ -537,21 +509,15 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
         <div>
           <h1 className="text-2xl font-black text-zinc-100 flex items-center gap-2">
             <Sparkles className="w-6 h-6 text-cyan-400" />
-            Cross-Chain NFT & Contract Studio
+            Polygon NFT Studio
           </h1>
           <p className="text-xs text-zinc-400 mt-1">
-            Mint individual 1/1 digital assets or deploy custom ERC-721 / ERC-1155 smart contracts with embedded EIP-2981 royalties.
+            Mint to the live WIP and Logo collections or create a collection through a deployed Polygon factory.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Target Network Dropdown */}
-          <div className="flex items-center gap-1.5">
-            <NetworkSelectorDropdown 
-              variant="header" 
-              id="mint-studio-header-network-dropdown" 
-            />
-          </div>
+          <span className="text-xs font-mono text-purple-300 border border-purple-500/30 rounded-lg px-2.5 py-2">Polygon Mainnet · 137</span>
 
           {/* Studio Mode Selector */}
           <div className="flex items-center gap-1.5 p-1 bg-zinc-950 rounded-xl border border-zinc-800">
@@ -753,44 +719,8 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
               )}
             </div>
 
-            {/* Network Gas Summary Box */}
-            <div className="p-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-zinc-300 flex items-center gap-1.5">
-                  <Fuel className="w-4 h-4 text-emerald-400" />
-                  Gas Fee Estimation
-                </span>
-                <NetworkSelectorDropdown variant="compact" id="preview-gas-network-dropdown" />
-              </div>
-
-              {/* Gas Speed Selector */}
-              <div className="grid grid-cols-4 gap-1.5">
-                {(['slow', 'standard', 'fast', 'instant'] as const).map((speed) => {
-                  const isSel = selectedGasSpeed === speed;
-                  const tier = gasData.tiers[speed];
-                  return (
-                    <button
-                      key={speed}
-                      onClick={() => setSelectedGasSpeed(speed)}
-                      className={`p-1.5 rounded-lg border text-center transition-all ${
-                        isSel 
-                          ? 'bg-zinc-800 border-emerald-500/50 text-emerald-400 font-bold' 
-                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-300'
-                      }`}
-                    >
-                      <div className="text-[10px] uppercase">{speed}</div>
-                      <div className="text-[11px] font-mono">{tier.totalGwei}</div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between text-xs">
-                <span className="text-zinc-400">Total Network Mint Cost:</span>
-                <span className="font-bold text-emerald-400 font-mono">
-                  {formatCrypto(gasData.actionsEstimate.mintSingle.crypto, currentChainConfig.symbol)} ({formatUsd(gasData.actionsEstimate.mintSingle.usd)})
-                </span>
-              </div>
+            <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-zinc-400">
+              Your wallet will show the live Polygon gas estimate before you confirm the mint.
             </div>
           </div>
 
@@ -835,28 +765,17 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                 </button>
               </div>
 
-              {/* Network to Mint To & Token Standard */}
+              {/* Network and supported token standard */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <NetworkSelectorDropdown 
-                  variant="form"
-                  label="Network to Mint NFT To *"
-                  id="single-mint-target-network"
-                />
-
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-zinc-300">Network</label>
+                  <div className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-semibold text-purple-300">Polygon Mainnet (137)</div>
+                </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-zinc-300 flex items-center justify-between">
                     <span>Token Standard</span>
-                    <span className="text-[10px] text-zinc-500 font-mono">Contract Architecture</span>
                   </label>
-                  <select
-                    value={tokenStandard}
-                    onChange={(e) => setTokenStandard(e.target.value as TokenStandard)}
-                    className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-semibold text-zinc-200 focus:outline-none focus:border-cyan-500/50"
-                  >
-                    <option value="ERC-721">ERC-721 (Unique 1/1 Edition)</option>
-                    <option value="ERC-1155">ERC-1155 (Multi-Edition Token)</option>
-                    <option value="SPL-NFT">SPL-NFT (Solana Standard)</option>
-                  </select>
+                  <div className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-semibold text-zinc-200">ERC-721</div>
                 </div>
               </div>
 
@@ -907,21 +826,6 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                 <div className="flex flex-wrap items-center gap-2 pt-0.5">
                   <button
                     type="button"
-                    id="chip-collection-contract-1000"
-                    onClick={() => handleCollectionChange('col-contract-1000')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      collectionId === 'col-contract-1000' || collectionId === 'col-wip-1000'
-                        ? 'bg-cyan-500/20 border border-cyan-500/50 text-cyan-200 shadow-sm ring-1 ring-cyan-500/30'
-                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Collection Contract (1/1000)</span>
-                    <span className="text-[10px] font-mono text-cyan-500/80">0x663D...</span>
-                  </button>
-
-                  <button
-                    type="button"
                     id="chip-wip-collection"
                     onClick={() => handleCollectionChange('col-wip-polygon')}
                     className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
@@ -970,18 +874,6 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                     )}
                   </button>
 
-                  <button
-                    type="button"
-                    id="chip-independent-1-1"
-                    onClick={() => handleCollectionChange('')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      collectionId === ''
-                        ? 'bg-zinc-800 border border-zinc-600 text-zinc-200 ring-1 ring-zinc-500/30'
-                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <span>Independent 1/1</span>
-                  </button>
                 </div>
 
                 {/* Primary Collection Dropdown */}
@@ -992,12 +884,6 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                     onChange={(e) => handleCollectionChange(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs font-semibold text-zinc-100 focus:outline-none focus:border-cyan-500/50 cursor-pointer"
                   >
-                    <optgroup label="⭐ Collection Factory (1/1000)">
-                      <option value="col-contract-1000">
-                        Collection Contract (1/1000) - Factory (0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37)
-                      </option>
-                    </optgroup>
-
                     <optgroup label={`⭐ Official WIP Collections (${isUserAuthorizedForWip ? 'Unlocked for you' : '🔒 Locked to Authorized Creators'})`}>
                       <option value="col-wip-polygon">
                         {isUserAuthorizedForWip ? '🔓' : '🔒'} Work In Progress - WIP Collection (0xc2eaa64D...ef9) {isUserAuthorizedForWip ? '[Authorized]' : '[Locked: Creator Only]'}
@@ -1007,23 +893,6 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                       </option>
                     </optgroup>
 
-                    <optgroup label="📄 Standalone Token">
-                      <option value="">
-                        Independent Single 1/1 Edition (Direct Smart Contract)
-                      </option>
-                    </optgroup>
-
-                    {collections.filter(c => c.id !== 'col-wip-polygon' && c.id !== 'col-wip-logo-polygon' && c.id !== 'col-contract-1000' && c.id !== 'col-wip-1000' && c.contractAddress.toLowerCase() !== WIP_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== WIP_LOGO_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== COLLECTION_FACTORY_1000.contractAddress.toLowerCase()).length > 0 && (
-                      <optgroup label="🌐 Other Deployed Collections">
-                        {collections
-                          .filter(c => c.id !== 'col-wip-polygon' && c.id !== 'col-wip-logo-polygon' && c.id !== 'col-contract-1000' && c.id !== 'col-wip-1000' && c.contractAddress.toLowerCase() !== WIP_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== WIP_LOGO_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== COLLECTION_FACTORY_1000.contractAddress.toLowerCase())
-                          .map(col => (
-                            <option key={col.id} value={col.id}>
-                              [{col.chainId.toUpperCase()}] {col.name} ({col.symbol}) • {col.standard} • {col.contractAddress.slice(0, 8)}...
-                            </option>
-                          ))}
-                      </optgroup>
-                    )}
                   </select>
                 </div>
 
@@ -1222,163 +1091,14 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                   </div>
                 )}
               </div>
-
-              {/* Token ID Selection Module (Auto Sequential vs Manual Selection) */}
-              <div className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <label className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
-                      <Hash className="w-4 h-4 text-cyan-400" />
-                      <span>Token ID Selection *</span>
-                    </label>
-                    <p className="text-[11px] text-zinc-400">
-                      Sequential numerical order starting at zero (#0) for new collections, or choose custom ID
-                    </p>
-                  </div>
-
-                  {/* Mode switcher: Auto Sequential vs Manual Custom */}
-                  <div className="flex items-center gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-semibold">
-                    <button
-                      type="button"
-                      id="token-id-mode-auto"
-                      onClick={() => setIsManualTokenId(false)}
-                      className={`px-3 py-1 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
-                        !isManualTokenId
-                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold shadow-sm'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Auto Sequential</span>
-                    </button>
-                    <button
-                      type="button"
-                      id="token-id-mode-manual"
-                      onClick={() => {
-                        setIsManualTokenId(true);
-                        if (!manualTokenId) setManualTokenId(suggestedNextTokenId);
-                      }}
-                      className={`px-3 py-1 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
-                        isManualTokenId
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold shadow-sm'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Manual Select</span>
-                    </button>
-                  </div>
+              <div className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800 flex items-center gap-3">
+                <Hash className="w-4 h-4 text-cyan-400" />
+                <div>
+                  <div className="text-xs font-bold text-zinc-200">Next sequential token ID</div>
+                  <div className="text-[11px] text-zinc-400">{formattedTokenId} · new collections begin at #0</div>
                 </div>
-
-                {!isManualTokenId ? (
-                  /* Auto Sequential View */
-                  <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center font-mono font-black text-cyan-400 text-base shadow-inner">
-                        {formattedTokenId}
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-zinc-100 flex items-center gap-2">
-                          <span>Next In Sequence:</span>
-                          <span className="font-mono text-cyan-300 text-sm font-extrabold">{formattedTokenId}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
-                            Collision Free
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-zinc-400 mt-0.5">
-                          Generated in strict numerical order (starts at #0 for new collections; next unminted sequence for existing contracts).
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      id="btn-switch-to-manual-token-id"
-                      onClick={() => {
-                        setIsManualTokenId(true);
-                        setManualTokenId(suggestedNextTokenId);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition-all border border-zinc-700 cursor-pointer"
-                    >
-                      <Sliders className="w-3 h-3 text-cyan-400" />
-                      <span>Manually Edit ID</span>
-                    </button>
-                  </div>
-                ) : (
-                  /* Manual Selection Input View */
-                  <div className="space-y-2.5 p-3.5 rounded-xl bg-zinc-900/60 border border-purple-500/30">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <span className="font-bold text-zinc-200 flex items-center gap-1.5">
-                        <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                        Specify Desired Token ID:
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setManualTokenId('0')}
-                          className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-mono transition-colors border border-zinc-700"
-                          title="Set to Genesis Token #0"
-                        >
-                          #0 (Genesis)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setManualTokenId(suggestedNextTokenId)}
-                          className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-cyan-300 text-[11px] font-mono transition-colors border border-zinc-700"
-                          title="Set to Next Sequential ID"
-                        >
-                          #{suggestedNextTokenId} (Next Auto)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsManualTokenId(false)}
-                          className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[11px] transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-2.5 text-zinc-500 font-mono font-bold text-sm select-none">
-                        #
-                      </span>
-                      <input
-                        type="text"
-                        id="manual-token-id-input"
-                        placeholder="e.g. 0, 7, 42, 100..."
-                        value={manualTokenId.replace(/^#/, '')}
-                        onChange={(e) => setManualTokenId(e.target.value.trim())}
-                        className="w-full pl-8 pr-28 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-sm font-mono font-bold text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-purple-500/60 shadow-inner"
-                      />
-                      <div className="absolute right-2 top-2">
-                        <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-zinc-900 border border-zinc-700 text-zinc-300">
-                          ID: {formattedTokenId}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Live Validation Banner */}
-                    <div className="flex items-center justify-between text-xs px-1">
-                      {isTokenIdColliding ? (
-                        <span className="text-amber-400 flex items-center gap-1.5 font-semibold">
-                          <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-                          <span>Warning: Token ID {formattedTokenId} already exists in this collection. Minting will overwrite or collide.</span>
-                        </span>
-                      ) : (
-                        <span className="text-emerald-400 flex items-center gap-1.5 font-semibold">
-                          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                          <span>Token ID {formattedTokenId} is verified available to mint in {selectedCol?.name || 'collection'}</span>
-                        </span>
-                      )}
-
-                      <span className="text-zinc-500 font-mono text-[11px]">
-                        Used: {usedTokenIds.numSet.size} tokens
-                      </span>
-                    </div>
-                  </div>
-                )}
               </div>
+
 
               {/* Royalty Engine Configuration */}
               <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
@@ -1633,49 +1353,9 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
       {studioMode === 'deploy' && (
         <div className="space-y-6">
           
-          {/* Sub Navigation Bar for Contract Deployer */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setContractDeployView('form')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  contractDeployView === 'form'
-                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <Settings2 className="w-3.5 h-3.5" />
-                Contract Parameters & Royalty Settings
-              </button>
-              <button
-                onClick={() => setContractDeployView('solidity')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  contractDeployView === 'solidity'
-                    ? 'bg-zinc-800 text-cyan-400 border border-zinc-700 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <FileCode className="w-3.5 h-3.5" />
-                Live Solidity Code & ABI
-              </button>
-              <button
-                onClick={() => setContractDeployView('simulator')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  contractDeployView === 'simulator'
-                    ? 'bg-zinc-800 text-emerald-400 border border-zinc-700 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <Calculator className="w-3.5 h-3.5" />
-                Royalty Distribution Simulator
-              </button>
-            </div>
-
-            {/* Target Network Dropdown */}
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-500 font-medium text-xs hidden sm:inline">Target Chain:</span>
-              <NetworkSelectorDropdown variant="compact" id="deploy-contract-network-dropdown" />
-            </div>
+          <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800">
+            <span className="text-xs font-bold text-zinc-200">Create a collection through a deployed Polygon factory</span>
+            <span className="text-xs font-mono text-purple-300 border border-purple-500/30 rounded-lg px-2 py-1">Polygon Mainnet · 137</span>
           </div>
 
           {/* VIEW: FORM PARAMETERS & ROYALTIES */}
@@ -1694,12 +1374,18 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                         Collection Contract (1/1000) Factory
                       </div>
                       <div className="text-[11px] text-zinc-400">
-                        Smart contracts for new 1/1000 collections are deployed via factory address:
-                        <span className="ml-1 font-mono text-cyan-300 font-semibold select-all">0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37</span>
+                        New Polygon collections use the selected factory:
+                        <select value={collectionFactoryType} onChange={event => setCollectionFactoryType(event.target.value as 'collection' | 'wip')} className="ml-2 bg-zinc-950 border border-zinc-700 rounded-md px-2 py-1 text-cyan-200">
+                          <option value="collection">1/1000 Collection Factory</option>
+                          <option value="wip">WIP Factory</option>
+                        </select>
+                        <div className="mt-1 font-mono text-cyan-300 font-semibold select-all">
+                          {collectionFactoryType === 'wip' ? WIP_FACTORY.address : COLLECTION_FACTORY_1000.contractAddress}
+                        </div>
                       </div>
                     </div>
                   </div>
-                  {contractMaxSupply !== 1000 && (
+                  {collectionFactoryType === 'collection' && contractMaxSupply !== 1000 && (
                     <button
                       type="button"
                       onClick={() => setContractMaxSupply(1000)}
@@ -1710,71 +1396,8 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                   )}
                 </div>
 
-                {/* 1. Token Standard Selection (ERC-721 vs ERC-1155) */}
-                <div className="p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-black uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
-                      <Cpu className="w-4 h-4 text-purple-400" />
-                      1. Select Token Standard
-                    </label>
-                    <span className="text-[11px] text-zinc-400 font-mono">EVM Compatible</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* ERC-721 Card */}
-                    <div
-                      onClick={() => setContractStandard('ERC-721')}
-                      className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        contractStandard === 'ERC-721'
-                          ? 'bg-purple-950/30 border-purple-500 shadow-lg shadow-purple-900/20'
-                          : 'bg-zinc-950 border-zinc-800/80 hover:border-zinc-700 text-zinc-400'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="font-extrabold text-sm text-zinc-100 flex items-center gap-1.5">
-                          ERC-721
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">
-                            Non-Fungible
-                          </span>
-                        </span>
-                        {contractStandard === 'ERC-721' && (
-                          <div className="w-5 h-5 rounded-full bg-purple-500 text-zinc-950 flex items-center justify-center">
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        Best for 1/1 unique artworks, individual avatars, generative PFP collections, and distinct digital collectibles where each token has a unique token ID.
-                      </p>
-                    </div>
-
-                    {/* ERC-1155 Card */}
-                    <div
-                      onClick={() => setContractStandard('ERC-1155')}
-                      className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        contractStandard === 'ERC-1155'
-                          ? 'bg-purple-950/30 border-purple-500 shadow-lg shadow-purple-900/20'
-                          : 'bg-zinc-950 border-zinc-800/80 hover:border-zinc-700 text-zinc-400'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="font-extrabold text-sm text-zinc-100 flex items-center gap-1.5">
-                          ERC-1155
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono">
-                            Multi-Token
-                          </span>
-                        </span>
-                        {contractStandard === 'ERC-1155' && (
-                          <div className="w-5 h-5 rounded-full bg-purple-500 text-zinc-950 flex items-center justify-center">
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        Best for semi-fungible editions, gaming items, membership badges, and batch transfer efficiency (saves up to 80% gas when sending multiple items).
-                      </p>
-                    </div>
-                  </div>
+                <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-zinc-300">
+                  Polygon ERC-721 collection creation through the selected live factory. The Collection Factory creates fixed 1,000-token collections; the WIP Factory uses its own on-chain collection registry.
                 </div>
 
                 {/* 2. Contract Metadata Parameters */}
@@ -1829,7 +1452,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-zinc-300">Category</label>
                       <select
@@ -1847,106 +1470,17 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-zinc-300">
-                        {contractStandard === 'ERC-721' ? 'Max Total Supply' : 'Max Supply / Edition'}
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={contractMaxSupply}
-                        onChange={(e) => setContractMaxSupply(parseInt(e.target.value, 10) || 1000)}
-                        className="w-full px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 font-mono focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-zinc-300">Public Mint Price ({currentChainConfig.symbol})</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={contractMintPrice}
-                        onChange={(e) => setContractMintPrice(parseFloat(e.target.value) || 0)}
-                        className="w-full px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 font-mono focus:outline-none"
-                      />
+                      <label className="text-xs font-bold text-zinc-300">Collection capacity</label>
+                      <div className="px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 font-mono">
+                        {collectionFactoryType === 'collection' ? '1,000 NFTs (factory fixed)' : 'Set by WIP Factory'}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-zinc-300">Base URI / IPFS Gateway</label>
-                    <input
-                      type="text"
-                      value={contractBaseUri}
-                      onChange={(e) => setContractBaseUri(e.target.value)}
-                      placeholder="ipfs://Qm.../"
-                      className="w-full px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-zinc-300 focus:outline-none"
-                    />
-                  </div>
                 </div>
 
-                {/* 3. Advanced Smart Contract Modules */}
-                <div className="p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-                  <label className="text-xs font-black uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    3. Smart Contract Extensions & Security
-                  </label>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
-                      <div>
-                        <div className="text-xs font-bold text-zinc-200">EIP-2981 Native On-Chain Royalties</div>
-                        <div className="text-[11px] text-zinc-400">Standardized royalty queries across OpenSea, Blur, Magic Eden, and Nexus Marketplace</div>
-                      </div>
-                      <div className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold">
-                        ENABLED
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
-                      <div>
-                        <div className="text-xs font-bold text-zinc-200">Burnable Extension ({contractStandard}Burnable)</div>
-                        <div className="text-[11px] text-zinc-400">Allows holders to permanently burn token for deflationary tokenomics or crafting</div>
-                      </div>
-                      <button
-                        onClick={() => setContractIsBurnable(!contractIsBurnable)}
-                        className={`w-9 h-5 rounded-full transition-colors p-0.5 flex items-center ${
-                          contractIsBurnable ? 'bg-purple-500 justify-end' : 'bg-zinc-800 justify-start'
-                        }`}
-                      >
-                        <div className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
-                      <div>
-                        <div className="text-xs font-bold text-zinc-200">Emergency Pausable Circuit Breaker</div>
-                        <div className="text-[11px] text-zinc-400">Contract owner can temporarily freeze minting or transfers in case of emergency</div>
-                      </div>
-                      <button
-                        onClick={() => setContractIsPausable(!contractIsPausable)}
-                        className={`w-9 h-5 rounded-full transition-colors p-0.5 flex items-center ${
-                          contractIsPausable ? 'bg-purple-500 justify-end' : 'bg-zinc-800 justify-start'
-                        }`}
-                      >
-                        <div className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
-                      <div>
-                        <div className="text-xs font-bold text-zinc-200">Operator Filter Registry Protection</div>
-                        <div className="text-[11px] text-zinc-400">Blocks zero-royalty evasion market contracts from trading your collection</div>
-                      </div>
-                      <button
-                        onClick={() => setContractEnforceOperatorFilter(!contractEnforceOperatorFilter)}
-                        className={`w-9 h-5 rounded-full transition-colors p-0.5 flex items-center ${
-                          contractEnforceOperatorFilter ? 'bg-purple-500 justify-end' : 'bg-zinc-800 justify-start'
-                        }`}
-                      >
-                        <div className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                      </button>
-                    </div>
-                  </div>
+                <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-zinc-400">
+                  The selected factory controls collection features. This form does not deploy custom bytecode or change factory settings.
                 </div>
 
               </div>
@@ -1959,15 +1493,15 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                   <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
                     <span className="text-xs font-black uppercase tracking-wider text-zinc-200 flex items-center gap-1.5">
                       <Percent className="w-4 h-4 text-purple-400" />
-                      Pre-Configured Royalty Settings
+                      Factory Royalty Parameters
                     </span>
                     <span className="text-xs font-mono font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-lg border border-purple-500/30">
-                      EIP-2981
+                      {collectionFactoryType === 'collection' ? 'Rate sent to factory' : 'Factory-defined rate'}
                     </span>
                   </div>
 
                   {/* Royalty Percentage Slider */}
-                  <div className="space-y-2">
+                  {collectionFactoryType === 'collection' && <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-semibold text-zinc-300">Creator Secondary Royalty</span>
                       <span className="font-mono text-base font-extrabold text-purple-400">{contractRoyalty}%</span>
@@ -1999,12 +1533,12 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                         </button>
                       ))}
                     </div>
-                  </div>
+                  </div>}
 
                   {/* Payout Address */}
                   <div className="space-y-1.5 pt-2 border-t border-zinc-800">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-zinc-300">Royalty Payout Receiver Address</label>
+                      <label className="text-xs font-bold text-zinc-300">Royalty Recipient Address</label>
                       <button
                         onClick={() => setContractRoyaltyPayoutAddress(activeAccount.address)}
                         className="text-[10px] text-purple-400 hover:underline font-medium"
@@ -2020,62 +1554,14 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                       className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-zinc-200 focus:outline-none focus:border-purple-500/50"
                     />
                     <p className="text-[10px] text-zinc-500">
-                      All marketplace secondary sale royalties will be automatically routed on-chain to this address.
+                      This address is passed to the selected factory. The WIP Factory ABI does not accept a royalty rate.
                     </p>
                   </div>
 
-                  {/* Live Mini Royalty Breakdown */}
-                  <div className="p-3 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-1.5 text-xs">
-                    <div className="flex justify-between text-zinc-400">
-                      <span>Sample 10 {currentChainConfig.symbol} Secondary Resale:</span>
-                    </div>
-                    <div className="flex justify-between text-zinc-300 font-mono pt-1 border-t border-zinc-800/80">
-                      <span className="text-purple-400 font-bold">Your Creator Royalty ({contractRoyalty}%):</span>
-                      <span className="text-purple-400 font-bold">
-                        {((10 * contractRoyalty) / 100).toFixed(3)} {currentChainConfig.symbol} (${(((10 * contractRoyalty) / 100) * currentChainConfig.usdPrice).toFixed(2)})
-                      </span>
-                    </div>
-                  </div>
                 </div>
 
-                {/* Gas Estimation & Cost Summary */}
-                <div className="p-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-zinc-300 flex items-center gap-1.5">
-                      <Fuel className="w-4 h-4 text-emerald-400" />
-                      Smart Contract Deployment Gas Fee
-                    </span>
-                    <NetworkSelectorDropdown variant="compact" id="deploy-gas-network-dropdown" />
-                  </div>
-
-                  {/* Speed Selector */}
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {(['slow', 'standard', 'fast', 'instant'] as const).map((speed) => {
-                      const isSel = selectedGasSpeed === speed;
-                      const tier = gasData.tiers[speed];
-                      return (
-                        <button
-                          key={speed}
-                          onClick={() => setSelectedGasSpeed(speed)}
-                          className={`p-1.5 rounded-lg border text-center transition-all ${
-                            isSel 
-                              ? 'bg-zinc-800 border-purple-500 text-purple-300 font-bold' 
-                              : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-300'
-                          }`}
-                        >
-                          <div className="text-[10px] uppercase">{speed}</div>
-                          <div className="text-[11px] font-mono">{tier.totalGwei}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-xs">
-                    <span className="text-zinc-400">Total Deployment Cost:</span>
-                    <span className="font-extrabold text-emerald-400 font-mono text-sm">
-                      {formatCrypto(gasData.actionsEstimate.mintCollection.crypto, currentChainConfig.symbol)} ({formatUsd(gasData.actionsEstimate.mintCollection.usd)})
-                    </span>
-                  </div>
+                <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-zinc-400">
+                  Polygon gas is estimated by your wallet when you review the transaction. No app-side gas estimate is shown here.
                 </div>
 
                 {/* Deploy Action Button */}
@@ -2085,11 +1571,11 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                   className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-extrabold text-sm shadow-xl shadow-purple-600/25 transition-all flex items-center justify-center gap-2"
                 >
                   <ShieldCheck className="w-5 h-5" />
-                  Deploy {contractStandard} Smart Contract to {currentChainConfig.name}
+                  Create {contractStandard} Collection on Polygon
                 </button>
 
                 <p className="text-[11px] text-center text-zinc-500">
-                  Bytecode compiled with Solidity v0.8.20 + OpenZeppelin 5.0 audited primitives.
+                  The configured factory creates and registers the collection on Polygon. Your wallet will show the transaction and gas estimate.
                 </p>
 
               </div>
@@ -2098,7 +1584,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
           )}
 
           {/* VIEW: LIVE SOLIDITY & ABI CODE VIEWER */}
-          {contractDeployView === 'solidity' && (
+          {false && contractDeployView === 'solidity' && (
             <div className="p-6 rounded-2xl bg-zinc-900/80 border border-zinc-800 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-4">
                 <div>
@@ -2145,7 +1631,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
           )}
 
           {/* VIEW: ROYALTY DISTRIBUTION SIMULATOR */}
-          {contractDeployView === 'simulator' && (
+          {false && contractDeployView === 'simulator' && (
             <div className="p-6 rounded-2xl bg-zinc-900/80 border border-zinc-800 space-y-6">
               <div className="border-b border-zinc-800 pb-4">
                 <h3 className="text-base font-bold text-zinc-100 flex items-center gap-2">
@@ -2351,9 +1837,9 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                       {executionStep > 1 ? <Check className="w-3 h-3" /> : '1'}
                     </div>
                     <span>
-                      {executionType === 'deploy' 
-                        ? 'Compiling Solidity Bytecode & EIP-2981 Royalty Interface' 
-                        : 'Pinning Media & Attributes to IPFS / Arweave'}
+                      {executionType === 'deploy'
+                        ? 'Prepare 1,000 token Polygon collection request'
+                        : 'Prepare metadata for the NFT contract'}
                     </span>
                   </div>
 
@@ -2365,7 +1851,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                     }`}>
                       {executionStep > 2 ? <Check className="w-3 h-3" /> : '2'}
                     </div>
-                    <span>Requesting EIP-712 Deployer Wallet Signature</span>
+                    <span>Confirm the transaction in your wallet</span>
                   </div>
 
                   <div className={`flex items-center gap-3 p-2.5 rounded-xl border text-xs ${
@@ -2376,7 +1862,7 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                     }`}>
                       {executionStep > 3 ? <Check className="w-3 h-3" /> : '3'}
                     </div>
-                    <span>Broadcasting to Mempool ({selectedGasSpeed.toUpperCase()} Gas Tier)</span>
+                    <span>Transaction submitted; waiting for Polygon confirmations</span>
                   </div>
                 </div>
               </div>

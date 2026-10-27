@@ -29,9 +29,12 @@ CREATE TABLE IF NOT EXISTS tokens (
   last_sale_chain VARCHAR(20),
   rarity_score DECIMAL(10,2),
   rarity_rank INT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(collection_id, token_id)
 );
+
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 -- Traits
 CREATE TABLE IF NOT EXISTS traits (
@@ -173,7 +176,7 @@ CREATE TABLE IF NOT EXISTS owner_wallets (
 );
 
 -- === LIVE DEPLOYED FEE COLLECTOR - 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E ===
--- Deployed on Polygon Block 93415806 - Green check success - Tx 0x5a2...b45b1
+-- Polygon deployment block supplied by the owner. Transaction hash was not supplied.
 INSERT INTO owner_wallets (wallet, label) VALUES 
   ('0xb30ee8937bb6488be0b8ea702618a2d50ba0c4b0', 'Account 16 - WIP Fees - feeWallet - YOU GET PAID'),
   ('0xbab06d358b181eb16e3189525bcc0bc4761a3762', 'Main Royalty - royaltyWallet - separate')
@@ -194,14 +197,16 @@ CREATE TABLE IF NOT EXISTS deployed_contracts (
 );
 
 INSERT INTO deployed_contracts (name, address, chain, block_number, tx_hash, fee_wallet, royalty_wallet, usdc_address) VALUES
-  ('WIPFeeCollectorV3_OneClick', '0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E', 'polygon', 93415806, '0x5a2...b45b1', '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0', '0xBaB06d358B181eB16e3189525BCc0bc4761a3762', '0x3c499c542cef5e3811e1192ce70d8cc03d5c3352')
+  ('WIPFeeCollectorV3_OneClick', '0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E', 'polygon', 93415806, NULL, '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0', '0xBaB06d358B181eB16e3189525BCc0bc4761a3762', '0x3c499c542cef5e3811e1192ce70d8cc03d5c3352')
 ON CONFLICT (chain, address) DO NOTHING;
 
 -- === YOUR LIVE COLLECTIONS - BOTH ADDED - DO NOT REMOVE ===
 INSERT INTO collections (chain, contract_address, name, symbol, total_supply) VALUES
-  ('polygon', '0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9', 'Work-In-Progress-NFTs', 'WIP', 1),
-  ('polygon', '0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6', 'WIP Logo Collection', 'WIPLOGO', 1)
-ON CONFLICT (chain, contract_address) DO NOTHING;
+  ('polygon', '0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9', 'Work-In-Progress-NFTs', 'WIP', 5),
+  ('polygon', '0x675fD85FbcB13CE8080DBba780424A9e571B7f46', 'WIP Logo Collection', 'WIPLOGO', 0)
+ON CONFLICT (chain, contract_address) DO UPDATE SET
+  name = EXCLUDED.name,
+  symbol = EXCLUDED.symbol;
 
 -- === SITE LINKS - Website, Socials, Blog, Newsletter ===
 CREATE TABLE IF NOT EXISTS site_links (

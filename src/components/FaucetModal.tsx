@@ -64,67 +64,14 @@ export const FaucetModal: React.FC<FaucetModalProps> = ({ isOpen, onClose }) => 
           </button>
         </div>
 
-        {/* Faucet Body */}
         <div className="p-6 space-y-4 overflow-y-auto">
-          <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-zinc-300 flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Tokens are automatically deposited to your connected wallet: <strong className="font-mono text-zinc-100">{activeAccount.address.slice(0, 6)}...{activeAccount.address.slice(-4)}</strong></span>
+          <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-sm text-zinc-300">
+            This app does not distribute test tokens. Use the official faucet for the selected test network; no balance will be credited here.
           </div>
-
-          <div className="space-y-2.5">
-            {allChains.map((chain) => {
-              const isClaiming = claimingChain === chain.id;
-              const isClaimed = claimedChain === chain.id;
-              const balance = activeAccount.balances[chain.id as BlockchainNetwork] || 0;
-
-              return (
-                <div
-                  key={chain.id}
-                  className="flex items-center justify-between p-3 rounded-2xl bg-zinc-900/40 hover:bg-zinc-900/70 border border-zinc-800 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{chain.icon}</span>
-                    <div>
-                      <div className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
-                        {chain.name}
-                        <span className="text-[10px] text-zinc-500 font-mono">({chain.testnetName})</span>
-                      </div>
-                      <div className="text-[11px] text-zinc-400 font-mono">
-                        Current: <strong className="text-zinc-200">{balance.toFixed(2)} {chain.symbol}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleClaim(chain.id as BlockchainNetwork)}
-                    disabled={isClaiming}
-                    id={`claim-faucet-${chain.id}`}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm ${
-                      isClaimed
-                        ? 'bg-emerald-500 text-zinc-950 font-black'
-                        : 'bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300'
-                    }`}
-                  >
-                    {isClaiming ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : isClaimed ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        Claimed!
-                      </>
-                    ) : (
-                      <>
-                        <Droplet className="w-3.5 h-3.5" />
-                        Claim +{chain.faucetAmount} {chain.faucetSymbol}
-                      </>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
+          <div className="text-xs text-zinc-500 font-mono">
+            Connected account: {activeAccount.address.slice(0, 6)}...{activeAccount.address.slice(-4)}
           </div>
         </div>
-
         {/* Footer */}
         <div className="p-4 border-t border-zinc-800 bg-zinc-900/40 text-center">
           <button

@@ -1,7 +1,7 @@
 // server.ts - PRODUCTION FINAL - EXPRESS + VITE + SUPABASE + FIRESTORE + GEMINI 3.8 FLASH - WHOLE - NO TRIMMING
 // Fee Collector LIVE: 0x063A3747Bb18cbbc6E3429e1E06Dea93616F7f6E Polygon Block 93415806
 // Fee Wallet (YOU GET PAID): 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0
-// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0xC2dE196A2A7AFa7197ff84D7Ef1C8BC7bd9ECcc6 WIPLOGO
+// Collections: 0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9 WIP + 0x675fD85FbcB13CE8080DBba780424A9e571B7f46 WIP Logo
 // SUPABASE Org: Work-in-Progress-NFTs | Project: WIP-nfts | Region: America us-east-1 | Pooler: aws-0-us-east-1.pooler.supabase.com:6543 | GitHub linked | No card needed
 
 import express, { type Request, type Response } from 'express';
@@ -26,6 +26,8 @@ import { createPublicClient, http } from 'viem';
 import { polygon } from 'viem/chains';
 import { firebaseConfig } from './firebase-config.ts';
 import { SITE_LINKS } from './deployed-config.ts';
+import { COLLECTION_FACTORY_1000, WIP_FACTORY } from './src/config/wipCollection.ts';
+import { collectionFactoryAbi, wipFactoryAbi } from './src/abi/polygonContracts.ts';
 
 // Prevent uncaught errors from crashing Cloud Run
 process.on('unhandledRejection', (reason, promise) => {
@@ -42,7 +44,10 @@ const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 
 if (!DATABASE_URL) {
-  console.warn("Notice: DATABASE_URL not set. Running in memory & Firestore mode.");
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DATABASE_URL is required in production; refusing to start without persistent Supabase storage.');
+  }
+  console.warn("Notice: DATABASE_URL not set. Running without persistent Supabase storage.");
 }
 
 // --- DATABASE POOLER (PORT 6543) WITH CIRCUIT BREAKER ---
@@ -91,6 +96,83 @@ export async function safeQuery<T = any>(sql: string, params?: any[]): Promise<T
     }
     return null;
   }
+}
+
+async function persistOnChainSnapshot(collectionData: { contractAddress: string; name: string; symbol: string; totalSupply: number; tokens: any[] }) {
+  const address = collectionData.contractAddress.toLowerCase();
+  const savedCollection = await safeQuery<any>(
+    `INSERT INTO collections (chain, contract_address, name, symbol, total_supply)
+     VALUES ('polygon', $1, $2, $3, $4)
+     ON CONFLICT (chain, contract_address) DO UPDATE SET name = EXCLUDED.name, symbol = EXCLUDED.symbol, total_supply = EXCLUDED.total_supply
+     RETURNING id`,
+    [address, collectionData.name, collectionData.symbol, collectionData.totalSupply]
+  );
+  const collectionId = savedCollection?.[0]?.id;
+  if (!collectionId || !collectionData.tokens.length) return;
+
+  const changedTokenIds: string[] = [];
+  for (let offset = 0; offset < collectionData.tokens.length; offset += 500) {
+    const chunk = collectionData.tokens.slice(offset, offset + 500);
+    const params: any[] = [];
+    const valueSql = chunk.map((token: any, index: number) => {
+      const start = index * 6;
+      params.push(collectionId, String(token.token_id ?? token.tokenId).replace(/^#/, ''), token.owner_wallet || null, token.metadata_ipfs_uri || null, token.name || null, token.image_ipfs_uri || token.image || null);
+      return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}, $${start + 6})`;
+    }).join(',');
+    const changedRows = await safeQuery<any>(
+      `INSERT INTO tokens (collection_id, token_id, owner_wallet, metadata_ipfs_uri, name, image_ipfs_uri)
+       VALUES ${valueSql}
+       ON CONFLICT (collection_id, token_id) DO UPDATE SET owner_wallet = EXCLUDED.owner_wallet,
+         metadata_ipfs_uri = EXCLUDED.metadata_ipfs_uri, name = EXCLUDED.name,
+         image_ipfs_uri = EXCLUDED.image_ipfs_uri, updated_at = NOW()
+       WHERE tokens.owner_wallet IS DISTINCT FROM EXCLUDED.owner_wallet
+          OR tokens.metadata_ipfs_uri IS DISTINCT FROM EXCLUDED.metadata_ipfs_uri
+          OR tokens.name IS DISTINCT FROM EXCLUDED.name
+          OR tokens.image_ipfs_uri IS DISTINCT FROM EXCLUDED.image_ipfs_uri
+       RETURNING token_id`,
+      params
+    );
+    changedTokenIds.push(...(changedRows || []).map(row => String(row.token_id)));
+  }
+  return [...new Set(changedTokenIds)];
+}
+
+async function refreshExternalMarketplaceMetadata(contractAddress: string, tokenId: string) {
+  const tasks: Promise<{ provider: string; status: string }>[] = [];
+  const openSeaKey = (process.env.OPENSEA_API_KEY || '').trim();
+  if (openSeaKey) {
+    tasks.push(fetch(`https://api.opensea.io/api/v2/chain/polygon/contract/${contractAddress}/nfts/${encodeURIComponent(tokenId)}/refresh`, {
+      method: 'POST', headers: { 'X-API-KEY': openSeaKey }, signal: AbortSignal.timeout(8000),
+    }).then(response => ({ provider: 'opensea', status: response.ok ? 'queued' : `http_${response.status}` })));
+  }
+  const thirdwebClientId = (process.env.THIRDWEB_CLIENT_ID || '').trim();
+  if (thirdwebClientId) {
+    const url = new URL(`https://insight.thirdweb.com/v1/nfts/metadata/refresh/${contractAddress}/${encodeURIComponent(tokenId)}`);
+    url.searchParams.set('chain', '137');
+    tasks.push(fetch(url, { headers: { 'x-client-id': thirdwebClientId }, signal: AbortSignal.timeout(8000) })
+      .then(response => ({ provider: 'thirdweb', status: response.ok ? 'queued' : `http_${response.status}` })));
+  }
+  return Promise.allSettled(tasks);
+}
+
+const pendingMarketplaceRefreshes = new Map<string, { contractAddress: string; tokenId: string }>();
+
+async function queueAndRefreshMarketplaceMetadata(contractAddress: string, tokenIds: string[]) {
+  if (!process.env.OPENSEA_API_KEY && !process.env.THIRDWEB_CLIENT_ID) return { queued: 0, attempted: 0 };
+  for (const tokenId of tokenIds) {
+    const id = String(tokenId).replace(/^#/, '');
+    if (/^\d+$/.test(id)) pendingMarketplaceRefreshes.set(`${contractAddress.toLowerCase()}:${id}`, { contractAddress, tokenId: id });
+  }
+  const batch = Array.from(pendingMarketplaceRefreshes.entries()).slice(0, 20);
+  for (const [key] of batch) pendingMarketplaceRefreshes.delete(key);
+  const outcomes = await Promise.allSettled(batch.map(([, token]) => refreshExternalMarketplaceMetadata(token.contractAddress, token.tokenId)));
+  outcomes.forEach((outcome, index) => {
+    if (outcome.status === 'rejected') {
+      const token = batch[index][1];
+      pendingMarketplaceRefreshes.set(`${token.contractAddress.toLowerCase()}:${token.tokenId}`, token);
+    }
+  });
+  return { queued: pendingMarketplaceRefreshes.size, attempted: batch.length };
 }
 
 // Safe Gemini AI Initializer - uses secret injected at runtime
@@ -154,7 +236,6 @@ export function isOwner(wallet: string): boolean {
 }
 
 // In-memory cache for live minted tokens across sessions
-const liveMintedTokens: any[] = [];
 
 // Polygon Public RPC Failover list
 const POLYGON_RPCS = [
@@ -166,103 +247,141 @@ const POLYGON_RPCS = [
 
 let onChainCache: any = null;
 let lastOnChainFetch = 0;
+const polygonCollectionCache = new Map<string, { expiresAt: number; value: any }>();
 
-export async function getOnChainWipData() {
-  const now = Date.now();
-  if (onChainCache && now - lastOnChainFetch < 60_000) {
-    return onChainCache;
+async function readFactoryCollectionAddresses(factoryAddress: string, abi: readonly unknown[], functionName: 'getAllCollections' | 'getWIPCollections'): Promise<string[]> {
+  for (const rpc of POLYGON_RPCS) {
+    try {
+      const client = createPublicClient({ chain: polygon, transport: http(rpc, { timeout: 8000 }) });
+      const addresses = await (client as any).readContract({ address: factoryAddress as `0x${string}`, abi, functionName });
+      return Array.isArray(addresses) ? addresses.filter((address): address is string => typeof address === 'string' && /^0x[a-fA-F0-9]{40}$/.test(address)) : [];
+    } catch { /* Try the next Polygon RPC. */ }
   }
+  return [];
+}
 
+async function fetchPolygonScanTokenIds(contractAddress: string): Promise<string[] | null> {
+  const apiKey = (process.env.POLYGONSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '').trim();
+  if (!apiKey) return null;
+  const records: any[] = [];
+  const pageSize = 10000;
+  for (let page = 1; page <= 10; page++) {
+    const url = new URL('https://api.etherscan.io/v2/api');
+    url.search = new URLSearchParams({
+      chainid: '137', module: 'account', action: 'tokennfttx', contractaddress: contractAddress,
+      page: String(page), offset: String(pageSize), sort: 'asc', apikey: apiKey,
+    }).toString();
+    const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (!response.ok) throw new Error(`Polygonscan API returned HTTP ${response.status}.`);
+    const body: any = await response.json();
+    if (!Array.isArray(body.result)) throw new Error(`Polygonscan API error: ${String(body.result || body.message || 'unknown response')}`);
+    records.push(...body.result);
+    if (body.result.length < pageSize) break;
+  }
+  return [...new Set(records.map(record => String(record.tokenID)).filter(id => /^\d+$/.test(id)))].slice(0, 5000);
+}
+
+async function fetchPolygonCollection(contractAddress: string) {
+  const cacheKey = contractAddress.toLowerCase();
+  const cached = polygonCollectionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
   const abi = [
     { name: 'name', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
     { name: 'symbol', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
     { name: 'totalSupply', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
     { name: 'owner', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
     { name: 'tokenURI', type: 'function', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
-    { name: 'ownerOf', type: 'function', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] }
+    { name: 'ownerOf', type: 'function', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] },
   ];
+  const address = contractAddress as `0x${string}`;
+  let lastError: unknown;
 
   for (const rpc of POLYGON_RPCS) {
     try {
-      const client = createPublicClient({ chain: polygon, transport: http(rpc, { timeout: 6000 }) });
-      const currentBlock = await client.getBlockNumber();
-      const clientAny = client as any;
-      const [name, symbol, totalSupply, owner] = await Promise.all([
-        clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'name' }).catch(() => 'WIP - Work in Progress-NFTs'),
-        clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'symbol' }).catch(() => 'WIP'),
-        clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'totalSupply' }).then((n: any) => Number(n)).catch(() => 5),
-        clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'owner' }).catch(() => ROYALTY_WALLET)
+      const client = createPublicClient({ chain: polygon, transport: http(rpc, { timeout: 8000 }) });
+      const bytecode = await client.getBytecode({ address });
+      if (!bytecode || bytecode === '0x') throw new Error('Address is not a deployed contract on Polygon.');
+      const c = client as any;
+      const [name, symbol, supply, owner, currentBlock] = await Promise.all([
+        c.readContract({ address, abi, functionName: 'name' }),
+        c.readContract({ address, abi, functionName: 'symbol' }),
+        c.readContract({ address, abi, functionName: 'totalSupply' }).catch(() => null),
+        c.readContract({ address, abi, functionName: 'owner' }).catch(() => ''),
+        client.getBlockNumber(),
       ]);
-
+      const indexedTokenIds = await fetchPolygonScanTokenIds(contractAddress).catch((error) => {
+        console.warn(`Polygonscan token index unavailable for ${contractAddress}; using sequential IDs only:`, error instanceof Error ? error.message : error);
+        return null;
+      });
+      const supplyCount = supply === null ? indexedTokenIds?.length : Number(supply);
+      if (supplyCount === undefined || !Number.isSafeInteger(supplyCount) || supplyCount < 0 || supplyCount > 5000) {
+        throw new Error(`Could not read a supported total supply for ${contractAddress}; configure a valid Polygonscan API key to index its transfers.`);
+      }
+      if (indexedTokenIds && indexedTokenIds.length > 5000) throw new Error('Collection exceeds the 5,000 item index limit.');
+      const tokenIds = indexedTokenIds || Array.from({ length: supplyCount }, (_, tokenId) => String(tokenId));
       const tokens: any[] = [];
-      const count = Math.min(Number(totalSupply), 10);
-      for (let i = 0; i < count; i++) {
+      for (let offset = 0; offset < tokenIds.length; offset += 40) {
+        const batch = await Promise.all(tokenIds.slice(offset, offset + 40).map(async (tokenId) => {
         try {
           const [tokenOwner, tokenUri] = await Promise.all([
-            clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'ownerOf', args: [BigInt(i)] }),
-            clientAny.readContract({ address: WIP_COLLECTION as `0x${string}`, abi, functionName: 'tokenURI', args: [BigInt(i)] })
+            c.readContract({ address, abi, functionName: 'ownerOf', args: [BigInt(tokenId)] }),
+            c.readContract({ address, abi, functionName: 'tokenURI', args: [BigInt(tokenId)] }),
           ]);
-          tokens.push({
-            tokenId: i,
-            token_id: `#${i}`,
-            owner_wallet: tokenOwner,
-            metadata_ipfs_uri: tokenUri,
-            name: `Work in Progress - WIP #${i}`,
-            contract_address: WIP_COLLECTION,
-            chain: 'polygon'
-          });
-        } catch {}
-      }
-
-      // Ensure all 7 WIP tokens (5 verified on-chain + 2 minted through app) are present
-      if (tokens.length < 7) {
-        const extraAppMinted = [
-          { tokenId: 5, token_id: '#5', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipKinetic088MetadataPolygon/5', name: 'Work in Progress - WIP #5', contract_address: WIP_COLLECTION, chain: 'polygon' },
-          { tokenId: 6, token_id: '#6', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipPrism101MetadataPolygon/6', name: 'Work in Progress - WIP #6', contract_address: WIP_COLLECTION, chain: 'polygon' },
-        ];
-        for (const extra of extraAppMinted) {
-          if (!tokens.some(t => t.tokenId === extra.tokenId || String(t.token_id) === extra.token_id)) {
-            tokens.push(extra);
+          const metadataUri = String(tokenUri || '');
+          const metadataUrl = metadataUri.startsWith('ipfs://')
+            ? `https://ipfs.io/ipfs/${metadataUri.slice('ipfs://'.length)}`
+            : metadataUri.startsWith('ar://') ? `https://arweave.net/${metadataUri.slice('ar://'.length)}` : metadataUri;
+          let metadata: any = {};
+          if (metadataUri.startsWith('data:application/json;base64,')) {
+            try { metadata = JSON.parse(Buffer.from(metadataUri.slice('data:application/json;base64,'.length), 'base64').toString('utf8')); } catch {}
+          } else if (metadataUrl.startsWith('https://') || metadataUrl.startsWith('http://')) {
+            const response = await fetch(metadataUrl, { signal: AbortSignal.timeout(6000) }).catch(() => null);
+            if (response?.ok) metadata = await response.json().catch(() => ({}));
           }
+          const rawImage = String(metadata.image || metadata.image_url || '');
+          const image = rawImage.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${rawImage.slice(7)}` : rawImage.startsWith('ar://') ? `https://arweave.net/${rawImage.slice(5)}` : rawImage;
+          return {
+            tokenId,
+            token_id: tokenId,
+            owner_wallet: String(tokenOwner),
+            metadata_ipfs_uri: metadataUri,
+            name: String(metadata.name || `${name} #${tokenId}`),
+            description: String(metadata.description || ''),
+            image,
+            image_ipfs_uri: rawImage,
+            animation_url: metadata.animation_url || metadata.animation || '',
+            traits: Array.isArray(metadata.attributes) ? metadata.attributes : [],
+            contract_address: contractAddress,
+            chain: 'polygon',
+            polygonscanUrl: `https://polygonscan.com/token/${contractAddress}?a=${tokenId}`,
+          };
+        } catch {
+          return null;
         }
+      }));
+        tokens.push(...batch.filter(Boolean));
       }
 
-      onChainCache = {
-        contractAddress: WIP_COLLECTION,
-        name,
-        symbol,
-        totalSupply: Math.max(Number(totalSupply), 7),
-        owner,
-        currentBlock: Number(currentBlock),
-        rpcUsed: rpc,
-        tokens,
-        fetchedAt: now
-      };
-      lastOnChainFetch = now;
-      return onChainCache;
-    } catch {
-      continue;
+      const data = { contractAddress, name: String(name), symbol: String(symbol), totalSupply: supplyCount, owner: String(owner), currentBlock: Number(currentBlock), tokens, rpcUsed: rpc, indexSource: indexedTokenIds ? 'polygonscan+polygon-rpc' : 'sequential-contract-enumeration', fetchedAt: Date.now() };
+      polygonCollectionCache.set(cacheKey, { value: data, expiresAt: Date.now() + 15_000 });
+      return data;
+    } catch (error) {
+      lastError = error;
     }
   }
+  throw lastError instanceof Error ? lastError : new Error(`Failed to read Polygon contract ${contractAddress}.`);
+}
 
-  // Fallback cache if public RPCs are temporarily rate-limited
-  return {
-    contractAddress: WIP_COLLECTION,
-    name: 'WIP - Work in Progress-NFTs',
-    symbol: 'WIP',
-    totalSupply: 7,
-    owner: ROYALTY_WALLET,
-    tokens: [
-      { tokenId: 0, token_id: '#0', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmZokcN2gKxCLxWvAS6G6qzpnQyiZQ3B7pwzgEd3U3auV9/0', name: 'Work in Progress - WIP #0', contract_address: WIP_COLLECTION, chain: 'polygon' },
-      { tokenId: 1, token_id: '#1', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmdxvXEPFcoeiyf5UmiyQyEBosUuiVrU7CreFyXKF8qNzJ/1', name: 'Work in Progress - WIP #1', contract_address: WIP_COLLECTION, chain: 'polygon' },
-      { tokenId: 2, token_id: '#2', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmNZMLZENGuDJmdZNrTyWYq2KybW9mzV4EC7oLsZUKBTDT/2', name: 'Work in Progress - WIP #2', contract_address: WIP_COLLECTION, chain: 'polygon' },
-      { tokenId: 3, token_id: '#3', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmPhUtKmuE2oKyBREmMhcjAV8qFZSSE1g1uYgdKvknAAdq/3', name: 'Work in Progress - WIP #3', contract_address: WIP_COLLECTION, chain: 'polygon' },
-      { tokenId: 4, token_id: '#4', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmZcB5Qk1FR19xTXLdmSDXJFn9UFHdhU1Az41CxqYyu1Jd/4', name: 'Work in Progress - WIP #4', contract_address: WIP_COLLECTION, chain: 'polygon' },
-      { tokenId: 5, token_id: '#5', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipKinetic088MetadataPolygon/5', name: 'Work in Progress - WIP #5', contract_address: WIP_COLLECTION, chain: 'polygon' },
-      { tokenId: 6, token_id: '#6', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipPrism101MetadataPolygon/6', name: 'Work in Progress - WIP #6', contract_address: WIP_COLLECTION, chain: 'polygon' },
-    ],
-    fetchedAt: now
-  };
+export async function getOnChainWipData() {
+  const now = Date.now();
+  if (onChainCache && now - lastOnChainFetch < 15_000) {
+    return onChainCache;
+  }
+
+  const data = await fetchPolygonCollection(WIP_COLLECTION);
+  onChainCache = data;
+  lastOnChainFetch = now;
+  return data;
 }
 
 // Fee resolution helper with resilient fallback
@@ -290,6 +409,7 @@ interface TrackedOnChainCollection {
   name: string;
   symbol: string;
   totalSupply: number;
+  maxSupply?: number;
   owner: string;
   royaltyPercentage: number;
   royaltyReceiver: string;
@@ -309,119 +429,67 @@ trackedOnChainCollections.set(WIP_COLLECTION.toLowerCase(), {
   address: WIP_COLLECTION,
   name: 'Work-In-Progress-NFTs',
   symbol: 'WIP',
-  totalSupply: 7,
+  totalSupply: 5,
+  maxSupply: 1000,
   owner: ROYALTY_WALLET,
-  royaltyPercentage: 10.0,
-  royaltyReceiver: ROYALTY_WALLET,
-  description: 'Official Work In Progress - WIP Collection smart contract on Polygon (0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9) with enforced 10% creator royalties.',
+  royaltyPercentage: 0,
+  royaltyReceiver: '',
+  description: 'Work In Progress collection on Polygon. Collection details are refreshed from the deployed contract.',
   category: 'art',
   tokens: [],
   lastSyncedAt: 0,
   polygonscanUrl: `https://polygonscan.com/address/${WIP_COLLECTION}`,
   source: 'on-chain',
-  verified: true
+  verified: false
 });
 
 trackedOnChainCollections.set(LOGO_COLLECTION.toLowerCase(), {
   address: LOGO_COLLECTION,
   name: 'WIP Logo Collection',
   symbol: 'WIPLOGO',
-  totalSupply: 3,
+  totalSupply: 0,
+  maxSupply: 1000,
   owner: ROYALTY_WALLET,
-  royaltyPercentage: 10.0,
-  royaltyReceiver: ROYALTY_WALLET,
-  description: 'Official WIP Logo Collection smart contract on Polygon (0x675fD85FbcB13CE8080DBba780424A9e571B7f46) with direct creator royalty routing.',
+  royaltyPercentage: 0,
+  royaltyReceiver: '',
+  description: 'WIP Logo collection on Polygon. Collection details are refreshed from the deployed contract.',
   category: 'art',
-  tokens: [
-    { tokenId: 0, token_id: '#0', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipLogoGenesisMetadataPolygon01/0', name: 'WIP Logo #0 - Genesis Monogram', contract_address: LOGO_COLLECTION, chain: 'polygon', price: 50.0, polygonscanUrl: `https://polygonscan.com/token/${LOGO_COLLECTION}?a=0` },
-    { tokenId: 1, token_id: '#1', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipLogoCyberMetadataPolygon02/1', name: 'WIP Logo #1 - Cyber Neon Monogram', contract_address: LOGO_COLLECTION, chain: 'polygon', price: 65.0, polygonscanUrl: `https://polygonscan.com/token/${LOGO_COLLECTION}?a=1` },
-    { tokenId: 2, token_id: '#2', owner_wallet: ROYALTY_WALLET, metadata_ipfs_uri: 'ipfs://QmWipLogoGoldMetadataPolygon03/2', name: 'WIP Logo #2 - Imperial Gold Emblem', contract_address: LOGO_COLLECTION, chain: 'polygon', price: 80.0, polygonscanUrl: `https://polygonscan.com/token/${LOGO_COLLECTION}?a=2` }
-  ],
-  lastSyncedAt: Date.now(),
+  tokens: [],
+  lastSyncedAt: 0,
   polygonscanUrl: `https://polygonscan.com/address/${LOGO_COLLECTION}`,
   source: 'on-chain',
-  verified: true
+  verified: false
 });
 
 // Generic reader for ANY ERC721 collection on Polygon Mainnet
 async function fetchOnChainERC721(contractAddress: string) {
-  const normAddr = contractAddress.toLowerCase();
-  const abi = [
-    { name: 'name', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
-    { name: 'symbol', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
-    { name: 'totalSupply', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-    { name: 'owner', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
-    { name: 'tokenURI', type: 'function', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
-    { name: 'ownerOf', type: 'function', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] }
-  ];
-
-  for (const rpc of POLYGON_RPCS) {
-    try {
-      const client = createPublicClient({ chain: polygon, transport: http(rpc, { timeout: 7000 }) });
-      const bytecode = await client.getBytecode({ address: contractAddress as `0x${string}` });
-      if (!bytecode || bytecode === '0x') {
-        throw new Error(`Address ${contractAddress} is not an on-chain smart contract on Polygon`);
-      }
-      const currentBlock = await client.getBlockNumber();
-      const clientAny = client as any;
-      const [name, symbol, totalSupply, owner] = await Promise.all([
-        clientAny.readContract({ address: contractAddress as `0x${string}`, abi, functionName: 'name' }).catch(() => 'On-Chain Polygon Collection'),
-        clientAny.readContract({ address: contractAddress as `0x${string}`, abi, functionName: 'symbol' }).catch(() => 'POL-NFT'),
-        clientAny.readContract({ address: contractAddress as `0x${string}`, abi, functionName: 'totalSupply' }).then((n: any) => Number(n)).catch(() => 0),
-        clientAny.readContract({ address: contractAddress as `0x${string}`, abi, functionName: 'owner' }).catch(() => ROYALTY_WALLET)
-      ]);
-
-      const tokens: any[] = [];
-      const count = Math.min(Number(totalSupply || 0), 25);
-      for (let i = 0; i < count; i++) {
-        try {
-          const [tokenOwner, tokenUri] = await Promise.all([
-            clientAny.readContract({ address: contractAddress as `0x${string}`, abi, functionName: 'ownerOf', args: [BigInt(i)] }).catch(() => owner),
-            clientAny.readContract({ address: contractAddress as `0x${string}`, abi, functionName: 'tokenURI', args: [BigInt(i)] }).catch(() => '')
-          ]);
-          tokens.push({
-            tokenId: i,
-            token_id: `#${i}`,
-            owner_wallet: tokenOwner,
-            metadata_ipfs_uri: tokenUri,
-            name: `${name} #${i}`,
-            contract_address: contractAddress,
-            chain: 'polygon',
-            polygonscanUrl: `https://polygonscan.com/token/${contractAddress}?a=${i}`
-          });
-        } catch {}
-      }
-
+  try {
+      const data = await fetchPolygonCollection(contractAddress);
       const collData: TrackedOnChainCollection = {
         address: contractAddress,
-        name: String(name),
-        symbol: String(symbol),
-        totalSupply: Math.max(Number(totalSupply), tokens.length),
-        owner: String(owner),
-        royaltyPercentage: 10.0,
-        royaltyReceiver: String(owner),
-        description: `Verified on-chain collection ${name} (${symbol}) indexed from Polygonscan & Polygon RPC at block ${currentBlock}.`,
+        name: data.name,
+        symbol: data.symbol,
+        totalSupply: data.totalSupply,
+        owner: data.owner,
+        royaltyPercentage: 0,
+        royaltyReceiver: data.owner,
+        description: `Verified Polygon ERC-721 collection indexed at block ${data.currentBlock}.`,
         category: 'art',
-        tokens,
-        lastSyncedAt: Date.now(),
+        tokens: data.tokens,
+        lastSyncedAt: data.fetchedAt,
         polygonscanUrl: `https://polygonscan.com/address/${contractAddress}`,
         source: 'on-chain',
         verified: true
       };
 
-      trackedOnChainCollections.set(normAddr, collData);
-      return { success: true, currentBlock: Number(currentBlock), collection: collData };
-    } catch (err: any) {
-      if (err.message?.includes('not an on-chain smart contract')) {
-        throw err;
-      }
-      continue;
-    }
+      trackedOnChainCollections.set(contractAddress.toLowerCase(), collData);
+      return { success: true, currentBlock: data.currentBlock, collection: collData };
+  } catch (err: any) {
+      throw err;
   }
-  throw new Error(`Failed to query Polygon RPC for contract ${contractAddress}`);
 }
 
-async function startServer() {
+async function startServer(shouldListen = true) {
   const app = express();
 
   // Middleware
@@ -458,10 +526,14 @@ async function startServer() {
       fee_wallet: FEE_WALLET,
       royalty_wallet: ROYALTY_WALLET,
       usdc: USDC_POLYGON,
-      collections_live: [
-        { address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', hasNFTs: true, totalSupply: 5 },
-        { address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', hasNFTs: true, label: 'Independent Single 1/1 Edition (Direct Smart Contract)' }
-      ],
+      collections_live: Array.from(trackedOnChainCollections.values()).map(collection => ({
+        address: collection.address,
+        name: collection.name,
+        symbol: collection.symbol,
+        hasNFTs: collection.verified && collection.totalSupply > 0,
+        totalSupply: collection.verified ? collection.totalSupply : null,
+        maxSupply: collection.maxSupply ?? null,
+      })),
       supabase: sqlOk ? `connected (America us-east-1) - ${colCount} collections` : (Date.now() < dbDisabledUntil ? 'circuit-breaker standby (memory/firestore fallback active)' : (process.env.DATABASE_URL ? 'connecting' : 'not configured')),
       cloud_sql: sqlOk ? `connected - ${colCount} collections` : 'fallback-mode',
       firestore: db ? 'enabled' : 'fallback-mode',
@@ -481,15 +553,20 @@ async function startServer() {
       feeCollector: FEE_COLLECTOR_ADDRESS,
       chain: FEE_COLLECTOR_CHAIN,
       block: 93415806,
-      txHash: "0x5a2...b45b1",
       feeWallet: FEE_WALLET,
       royaltyWallet: ROYALTY_WALLET,
       usdc: USDC_POLYGON,
-      collections: [
-        { name: 'Work-In-Progress-NFTs', address: WIP_COLLECTION, symbol: 'WIP', chain: 'polygon', source: 'on-chain', totalSupply: 5, hasNFTs: true },
-        { name: 'WIP Logo Collection', address: LOGO_COLLECTION, symbol: 'WIPLOGO', chain: 'polygon', source: 'on-chain', hasNFTs: true, label: 'Independent Single 1/1 Edition (Direct Smart Contract)' }
-      ],
-      status: "LIVE - Verified on-chain Polygon contract",
+      collections: Array.from(trackedOnChainCollections.values()).map(collection => ({
+        name: collection.name,
+        address: collection.address,
+        symbol: collection.symbol,
+        chain: 'polygon',
+        source: collection.verified ? 'on-chain' : 'configured',
+        totalSupply: collection.verified ? collection.totalSupply : null,
+        maxSupply: collection.maxSupply ?? null,
+        hasNFTs: collection.verified && collection.totalSupply > 0,
+      })),
+      status: "Polygon collections are verified after an RPC sync",
       note: "Port binding and resilient database circuit-breaker active"
     });
   });
@@ -540,11 +617,11 @@ async function startServer() {
     if (rows && rows.length > 0) return res.json({ source: 'supabase', data: rows });
 
     res.json({
-      source: 'on-chain-verified',
-      data: [
-        { chain: 'polygon', contract_address: WIP_COLLECTION, name: 'Work-In-Progress-NFTs', symbol: 'WIP', total_supply: 5 },
-        { chain: 'polygon', contract_address: LOGO_COLLECTION, name: 'WIP Logo Collection', symbol: 'WIPLOGO', total_supply: 1 }
-      ]
+      source: 'on-chain',
+      data: Array.from(trackedOnChainCollections.values()).filter(collection => collection.verified).map(collection => ({
+        chain: 'polygon', contract_address: collection.address, name: collection.name,
+        symbol: collection.symbol, total_supply: collection.totalSupply,
+      })),
     });
   });
 
@@ -552,27 +629,47 @@ async function startServer() {
   app.get('/api/wip/tokens', async (req: Request, res: Response) => {
     let dbTokens: any[] = [];
     const rows = await safeQuery(`
-      SELECT t.*, c.contract_address, c.name as collection_name
+      SELECT t.*, c.contract_address, c.name as collection_name,
+             (active_listing.price IS NOT NULL) AS is_listed,
+             active_listing.price, active_listing.created_at AS listed_at
       FROM tokens t
       LEFT JOIN collections c ON t.collection_id = c.id
+      LEFT JOIN LATERAL (
+        SELECT l.price, l.created_at FROM listings l
+        WHERE l.token_id = t.id AND l.status = 'active'
+        ORDER BY l.created_at DESC LIMIT 1
+      ) active_listing ON TRUE
       WHERE c.contract_address IN ($1, $2)
          OR t.collection_id IN ('col-wip-polygon', 'col-wip-logo-polygon', $1, $2)
       ORDER BY t.created_at DESC
     `, [WIP_COLLECTION, LOGO_COLLECTION]);
-    if (rows) dbTokens = rows;
+    if (rows) dbTokens = rows.map((row: any) => ({ ...row, collection_id: String(row.contract_address || '').toLowerCase() }));
 
     // Fetch verified on-chain tokens from Polygon
     let onChainTokens: any[] = [];
-    try {
-      const onChain = await getOnChainWipData();
-      if (onChain?.tokens) onChainTokens = onChain.tokens;
-    } catch {}
+    for (const address of [WIP_COLLECTION, LOGO_COLLECTION]) {
+      try {
+        const onChain = address.toLowerCase() === WIP_COLLECTION.toLowerCase()
+          ? await getOnChainWipData()
+          : await fetchPolygonCollection(address);
+        if (onChain?.tokens) {
+          onChainTokens.push(...onChain.tokens);
+          const changed = await persistOnChainSnapshot({ contractAddress: address, name: onChain.name, symbol: onChain.symbol, totalSupply: onChain.totalSupply, tokens: onChain.tokens });
+          await queueAndRefreshMarketplaceMetadata(address, changed || []);
+        }
+      } catch (error) {
+        console.warn(`Polygon collection sync failed for ${address}:`, error instanceof Error ? error.message : error);
+      }
+    }
 
     res.json({
-      success: true,
+      success: onChainTokens.length > 0 || dbTokens.length > 0,
       syncedAt: Date.now(),
-      onChainSupply: onChainTokens.length || 7,
-      tokens: [...dbTokens, ...liveMintedTokens, ...onChainTokens]
+      onChainSupply: onChainTokens.length,
+      tokens: [
+        ...onChainTokens.map((token: any) => ({ ...token, source: 'on-chain' })),
+        ...dbTokens.map((token: any) => ({ ...token, source: 'supabase' })),
+      ]
     });
   });
 
@@ -600,16 +697,55 @@ async function startServer() {
   // =========================================================================
   app.get('/api/onchain/collections', async (req: Request, res: Response) => {
     try {
-      // Refresh WIP data
-      const wipOnChain = await getOnChainWipData();
-      const wipEntry = trackedOnChainCollections.get(WIP_COLLECTION.toLowerCase());
-      if (wipEntry && wipOnChain) {
-        wipEntry.totalSupply = wipOnChain.totalSupply;
-        wipEntry.tokens = wipOnChain.tokens;
-        wipEntry.lastSyncedAt = Date.now();
+      const saved = await safeQuery<any>('SELECT chain, contract_address, name, symbol FROM collections WHERE LOWER(chain) = $1', ['polygon']);
+      const addresses = new Map<string, string>([
+        [WIP_COLLECTION.toLowerCase(), WIP_COLLECTION],
+        [LOGO_COLLECTION.toLowerCase(), LOGO_COLLECTION],
+      ]);
+      const [factoryCollections, wipFactoryCollections] = await Promise.all([
+        readFactoryCollectionAddresses(COLLECTION_FACTORY_1000.contractAddress, collectionFactoryAbi, 'getAllCollections'),
+        readFactoryCollectionAddresses(WIP_FACTORY.address, wipFactoryAbi, 'getWIPCollections'),
+      ]);
+      for (const address of [...factoryCollections, ...wipFactoryCollections]) addresses.set(address.toLowerCase(), address);
+      for (const row of saved || []) {
+        if (typeof row.contract_address === 'string' && /^0x[a-fA-F0-9]{40}$/.test(row.contract_address)) {
+          addresses.set(row.contract_address.toLowerCase(), row.contract_address);
+        }
       }
+      for (const address of trackedOnChainCollections.keys()) addresses.set(address, address);
 
-      const list = Array.from(trackedOnChainCollections.values()).map(c => ({
+      const synced = await Promise.allSettled(Array.from(addresses.values(), async (address) => {
+        const data = address.toLowerCase() === WIP_COLLECTION.toLowerCase()
+          ? await getOnChainWipData()
+          : await fetchPolygonCollection(address);
+        const previous = trackedOnChainCollections.get(address.toLowerCase());
+        const entry: TrackedOnChainCollection = {
+          address,
+          name: data.name,
+          symbol: data.symbol,
+          totalSupply: data.totalSupply,
+          maxSupply: previous?.maxSupply ?? (address.toLowerCase() === WIP_COLLECTION.toLowerCase() || address.toLowerCase() === LOGO_COLLECTION.toLowerCase() ? 1000 : undefined),
+          owner: data.owner || previous?.owner || '',
+          royaltyPercentage: previous?.royaltyPercentage || 0,
+          royaltyReceiver: previous?.royaltyReceiver || data.owner || '',
+          description: previous?.description || '',
+          category: previous?.category || 'art',
+          tokens: data.tokens,
+          lastSyncedAt: data.fetchedAt,
+          polygonscanUrl: `https://polygonscan.com/address/${address}`,
+          source: 'on-chain',
+          verified: true,
+        };
+        trackedOnChainCollections.set(address.toLowerCase(), entry);
+        const changed = await persistOnChainSnapshot({ contractAddress: address, name: data.name, symbol: data.symbol, totalSupply: data.totalSupply, tokens: data.tokens });
+        await queueAndRefreshMarketplaceMetadata(address, changed || []);
+        return entry;
+      }));
+
+      const successful = synced.filter((r): r is PromiseFulfilledResult<TrackedOnChainCollection> => r.status === 'fulfilled').map(r => r.value);
+      const failed = synced.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+
+      const list = successful.map(c => ({
         id: c.address.toLowerCase(),
         contractAddress: c.address,
         name: c.name,
@@ -618,25 +754,26 @@ async function startServer() {
         chainId: 'polygon',
         standard: 'ERC-721',
         creatorAddress: c.owner,
-        creatorName: 'Verified Polygon Creator',
+        creatorName: '',
         royaltyPercentage: c.royaltyPercentage,
         royaltyPayoutAddress: c.royaltyReceiver,
         category: c.category,
-        maxSupply: 1000,
+          maxSupply: c.maxSupply ?? null,
         currentSupply: c.totalSupply,
-        floorPrice: 25.0,
-        totalVolume: 65000,
-        ownersCount: 2,
-        createdAt: c.lastSyncedAt || Date.now(),
+        floorPrice: null,
+        totalVolume: null,
+        ownersCount: null,
+        createdAt: 0,
         verified: true,
         polygonscanUrl: c.polygonscanUrl,
         source: 'on-chain'
       }));
 
       res.json({
-        success: true,
+        success: successful.length > 0,
         count: list.length,
         collections: list,
+        errors: failed.map(result => String(result.reason?.message || result.reason)),
         polygonscanBaseUrl: 'https://polygonscan.com',
         syncedAt: Date.now()
       });
@@ -657,6 +794,8 @@ async function startServer() {
     try {
       const cleanAddr = contractAddress.trim();
       const result = await fetchOnChainERC721(cleanAddr);
+      const changed = await persistOnChainSnapshot({ contractAddress: result.collection.address, name: result.collection.name, symbol: result.collection.symbol, totalSupply: result.collection.totalSupply, tokens: result.collection.tokens });
+      await queueAndRefreshMarketplaceMetadata(result.collection.address, changed || []);
       res.json({
         success: true,
         message: `Successfully verified and imported ${result.collection.name} from Polygonscan & Polygon Mainnet!`,
@@ -674,45 +813,65 @@ async function startServer() {
 
   app.get('/api/onchain/marketplace-sync', async (req: Request, res: Response) => {
     try {
-      // 1. Fetch WIP on-chain data
-      const wipData = await getOnChainWipData();
-      
-      // 2. Aggregate all tokens across tracked collections
-      const allTokens: any[] = [];
-
-      // Add WIP tokens
-      if (wipData?.tokens) {
-        allTokens.push(...wipData.tokens);
-      }
-
-      // Add tracked collections tokens
-      for (const [addr, col] of trackedOnChainCollections.entries()) {
-        if (addr !== WIP_COLLECTION.toLowerCase() && col.tokens && col.tokens.length > 0) {
-          allTokens.push(...col.tokens);
+      const collections = await safeQuery<any>('SELECT contract_address FROM collections WHERE LOWER(chain) = $1', ['polygon']);
+      const addresses = new Map<string, string>([
+        [WIP_COLLECTION.toLowerCase(), WIP_COLLECTION],
+        [LOGO_COLLECTION.toLowerCase(), LOGO_COLLECTION],
+      ]);
+      const [factoryCollections, wipFactoryCollections] = await Promise.all([
+        readFactoryCollectionAddresses(COLLECTION_FACTORY_1000.contractAddress, collectionFactoryAbi, 'getAllCollections'),
+        readFactoryCollectionAddresses(WIP_FACTORY.address, wipFactoryAbi, 'getWIPCollections'),
+      ]);
+      for (const address of [...factoryCollections, ...wipFactoryCollections]) addresses.set(address.toLowerCase(), address);
+      for (const row of collections || []) if (/^0x[a-fA-F0-9]{40}$/.test(row.contract_address || '')) addresses.set(row.contract_address.toLowerCase(), row.contract_address);
+      for (const address of trackedOnChainCollections.values()) addresses.set(address.address.toLowerCase(), address.address);
+      const results = await Promise.allSettled(Array.from(addresses.values(), address => fetchPolygonCollection(address)));
+      const successful = results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled').map(r => r.value);
+      const dedupedTokens = successful.flatMap(c => c.tokens);
+      const currentBlock = successful[0]?.currentBlock;
+      const activeListings = await safeQuery<any>(
+        `SELECT LOWER(c.contract_address) AS contract_address, t.token_id, l.price, l.currency, l.created_at
+         FROM listings l JOIN tokens t ON t.id = l.token_id JOIN collections c ON c.id = t.collection_id
+         WHERE LOWER(c.chain) = 'polygon' AND l.status = 'active'`
+      );
+      const listingMap = new Map((activeListings || []).map(listing => [`${listing.contract_address}:${String(listing.token_id).replace(/^#/, '')}`, listing]));
+      for (const c of successful) {
+        const existing = trackedOnChainCollections.get(c.contractAddress.toLowerCase());
+        if (existing) {
+          existing.totalSupply = c.totalSupply;
+          existing.tokens = c.tokens;
+          existing.lastSyncedAt = c.fetchedAt;
+          existing.verified = true;
         }
+        const changed = await persistOnChainSnapshot({ contractAddress: c.contractAddress, name: c.name, symbol: c.symbol, totalSupply: c.totalSupply, tokens: c.tokens });
+        await queueAndRefreshMarketplaceMetadata(c.contractAddress, changed || []);
       }
-
-      // Add live minted tokens
-      allTokens.push(...liveMintedTokens);
-
-      // Deduplicate tokens
-      const seen = new Set<string>();
-      const dedupedTokens = allTokens.filter(t => {
-        const key = `${(t.contract_address || t.contractAddress || '').toLowerCase()}:${String(t.tokenId || t.token_id || '')}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
 
       res.json({
-        success: true,
+        success: successful.length > 0,
         network: 'polygon',
         chainId: 137,
-        currentBlock: wipData?.currentBlock || 96175000,
+        currentBlock,
         syncedAt: Date.now(),
-        collectionsCount: trackedOnChainCollections.size,
+        collectionsCount: successful.length,
         totalTokens: dedupedTokens.length,
-        tokens: dedupedTokens,
+        tokens: successful.flatMap(c => c.tokens.map((token: any) => {
+          const listing = listingMap.get(`${c.contractAddress.toLowerCase()}:${String(token.token_id).replace(/^#/, '')}`);
+          return {
+            ...token,
+            source: 'on-chain',
+            collection_id: c.contractAddress.toLowerCase(),
+            collection_name: c.name,
+            collection_creator_address: c.owner,
+            royalty_percentage: trackedOnChainCollections.get(c.contractAddress.toLowerCase())?.royaltyPercentage || 0,
+            royalty_receiver: trackedOnChainCollections.get(c.contractAddress.toLowerCase())?.royaltyReceiver || '',
+            is_listed: Boolean(listing),
+            price: listing?.price,
+            currency: listing?.currency,
+            listed_at: listing?.created_at,
+          };
+        })),
+        errors: results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map(r => String(r.reason?.message || r.reason)),
         polygonscanBaseUrl: 'https://polygonscan.com'
       });
     } catch (err: any) {
@@ -858,138 +1017,9 @@ async function startServer() {
     res.status(404).json({ error: 'Token metadata not found' });
   });
 
-  // === MINT RECORD & FEE LOGGING ===
-  app.post('/api/mint', async (req: Request, res: Response) => {
-    const { collection_id, token_id, owner_wallet = '', metadata_ipfs_uri, traits, usdc_tx_hash, chain, name, image, price } = req.body || {};
-    const fee = await getFee('mint');
-    const ownerFree = isOwner(owner_wallet);
-    const isWip = 
-      collection_id === 'col-wip-polygon' || 
-      collection_id === 'col-wip-logo-polygon' || 
-      String(collection_id).toLowerCase() === WIP_COLLECTION.toLowerCase() || 
-      String(collection_id).toLowerCase() === LOGO_COLLECTION.toLowerCase();
-
-    // STRICT ACCESS LOCK: Work In Progress - WIP collection & WIP logo collection are locked
-    // Only 0xBaB06d358B181eB16e3189525BCc0bc4761a3762 & 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0 can mint
-    if (isWip && !ownerFree) {
-      return res.status(403).json({
-        success: false,
-        error: 'Work In Progress - WIP collection & WIP logo collection are locked. Only 0xBaB06d358B181eB16e3189525BCc0bc4761a3762 & 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0 can mint to these collections.',
-        authorized_wallets: [
-          "0xBaB06d358B181eB16e3189525BCc0bc4761a3762",
-          "0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0"
-        ]
-      });
-    }
-
-    if (!ownerFree && !isWip && fee > 0 && !usdc_tx_hash) {
-      return res.status(402).json({
-        error: 'USDC fee required',
-        fee_usdc: fee,
-        fee_token: 'USDC',
-        fee_collector: FEE_COLLECTOR_ADDRESS,
-        fee_wallet: FEE_WALLET
-      });
-    }
-
-    let tokenDbId = `token-${Date.now()}`;
-    const synced: string[] = [];
-
-    if (pool && Date.now() >= dbDisabledUntil) {
-      try {
-        const client = await pool.connect();
-        try {
-          await client.query('BEGIN');
-          let collId = collection_id;
-          if (collection_id && String(collection_id).startsWith('0x')) {
-            const { rows: collRows } = await client.query('SELECT id FROM collections WHERE contract_address = $1', [collection_id]);
-            collId = collRows[0]?.id || collection_id;
-          }
-
-          const { rows } = await client.query(
-            'INSERT INTO tokens (collection_id, token_id, owner_wallet, metadata_ipfs_uri, name, image_ipfs_uri) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
-            [collId, token_id, owner_wallet, metadata_ipfs_uri, name || token_id, image || '']
-          );
-          if (rows && rows[0]?.id) tokenDbId = rows[0].id;
-
-          for (const tr of traits || []) {
-            await client.query('INSERT INTO traits (token_id, trait_type, trait_value) VALUES ($1,$2,$3)', [tokenDbId, tr.trait_type, tr.trait_value]);
-            await client.query(
-              'INSERT INTO trait_counts (collection_id, trait_type, trait_value, count, frequency) VALUES ($1,$2,$3,1,0) ON CONFLICT (collection_id, trait_type, trait_value) DO UPDATE SET count = trait_counts.count + 1',
-              [collId, tr.trait_type, tr.trait_value]
-            );
-          }
-
-          await client.query(
-            'INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,$2,$3,$4,$5,$6)',
-            [owner_wallet, 'mint', ownerFree ? 0 : fee, usdc_tx_hash || null, chain || 'polygon', ownerFree]
-          );
-          await client.query('COMMIT');
-          synced.push('supabase');
-        } catch (e: any) {
-          await client.query('ROLLBACK');
-          console.warn('Database mint rollback notice:', e?.message || e);
-        } finally {
-          client.release();
-        }
-      } catch (connErr: any) {
-        dbDisabledUntil = Date.now() + 120_000;
-        console.warn('Database connection unavailable for mint, proceeding with Firestore/memory:', connErr?.message || connErr);
-      }
-    }
-
-    if (db) {
-      try {
-        await setDoc(doc(db, 'nfts', tokenDbId), {
-          id: tokenDbId,
-          tokenId: token_id,
-          name: name || token_id,
-          image: image || '',
-          chainId: chain || 'polygon',
-          standard: 'ERC-721',
-          collectionId: collection_id,
-          creatorAddress: owner_wallet,
-          ownerAddress: owner_wallet,
-          royaltyPercentage: 5,
-          price: 0,
-          isListed: false,
-          createdAt: Date.now(),
-          ipfsMetadataUri: metadata_ipfs_uri,
-          ipfsImageUri: image || '',
-          txHash: usdc_tx_hash || '',
-          feeCollector: FEE_COLLECTOR_ADDRESS,
-        });
-        synced.push('firestore');
-      } catch (e) {
-        console.warn('Firestore setDoc notice:', e);
-      }
-    }
-
-    const mintedRecord = {
-      id: tokenDbId,
-      token_id,
-      name: name || token_id,
-      image: image || '',
-      image_ipfs_uri: image || '',
-      collection_id,
-      owner_wallet,
-      chain: chain || 'polygon',
-      metadata_ipfs_uri,
-      traits: traits || [],
-      price: price !== undefined ? Number(price) : (collection_id === 'col-wip-logo-polygon' || String(collection_id).toLowerCase() === LOGO_COLLECTION.toLowerCase() ? 50.0 : 25.0),
-      created_at: new Date().toISOString()
-    };
-    liveMintedTokens.unshift(mintedRecord);
-
-    res.json({
-      success: true,
-      tokenDbId,
-      fee_charged: ownerFree ? 0 : fee,
-      is_owner_free: ownerFree,
-      fee_collector: FEE_COLLECTOR_ADDRESS,
-      fee_wallet: FEE_WALLET,
-      synced_to: synced.length > 0 ? synced : ['memory']
-    });
+  // Legacy mint-record endpoint is retired; the Polygon indexer writes verified chain snapshots only.
+  app.post('/api/mint', (_req: Request, res: Response) => {
+    res.status(410).json({ success: false, error: 'Mint recording is disabled. Submit a real on-chain mint; the indexer will discover it.' });
   });
 
   // === LISTINGS / MARKETPLACE ===
@@ -1011,25 +1041,8 @@ async function startServer() {
     res.json([]);
   });
 
-  app.post('/api/list', async (req: Request, res: Response) => {
-    const { token_id, seller_wallet, chain, price, currency, usdc_tx_hash } = req.body || {};
-    const fee = await getFee('list');
-    const ownerFree = isOwner(seller_wallet);
-    if (!ownerFree && fee > 0 && !usdc_tx_hash) {
-      return res.status(402).json({ error: 'USDC fee required for listing', fee_usdc: fee });
-    }
-    const rows = await safeQuery(
-      `INSERT INTO listings (token_id, seller_wallet, chain, price, currency, status) VALUES ($1,$2,$3,$4,$5,'active') RETURNING *`,
-      [token_id, seller_wallet, chain || 'polygon', price, currency || 'USDC']
-    );
-    if (rows && rows[0]) {
-      await safeQuery(
-        `INSERT INTO fee_transactions (wallet, action, fee_usdc, tx_hash, chain, is_owner_free) VALUES ($1,'list',$2,$3,$4,$5)`,
-        [seller_wallet, ownerFree ? 0 : fee, usdc_tx_hash || null, chain || 'polygon', ownerFree]
-      );
-      return res.json(rows[0]);
-    }
-    res.json({ success: true, listed: true });
+  app.post('/api/list', (_req: Request, res: Response) => {
+    res.status(410).json({ success: false, error: 'Off-chain listing simulation is disabled. A verified marketplace contract is not configured.' });
   });
 
   // === PORTFOLIO ===
@@ -1602,10 +1615,10 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
       console.warn('Vite dev middleware initialization error:', err);
     }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    const clientPath = path.join(process.cwd(), 'public');
+    app.use(express.static(clientPath));
     app.get('*', (req, res) => {
-      const indexPath = path.join(distPath, 'index.html');
+      const indexPath = path.join(clientPath, 'index.html');
       res.sendFile(indexPath, (err) => {
         if (err && !res.headersSent) {
           res.status(500).send('Application bundle is starting up...');
@@ -1614,31 +1627,34 @@ Return structured JSON according to OpenSea & ERC-721 metadata standards.`
     });
   }
 
-  // App always listens on port 3000 behind container Nginx (which listens on 8080 and proxies to 3000)
-  const PORT = 3000;
-
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 WIP NFT LIVE APP - Running on http://0.0.0.0:${PORT} (${isProd ? 'PRODUCTION' : 'DEVELOPMENT'})`);
-    console.log(`Fee Collector: ${FEE_COLLECTOR_ADDRESS} (Block 93415806) | Fee Wallet: ${FEE_WALLET}`);
-    console.log(`Collections: WIP (${WIP_COLLECTION}) & WIPLOGO (${LOGO_COLLECTION})`);
-    console.log(`On-Chain Supply: 5 Verified Tokens (#0-#4)`);
-  });
-
-  server.on('error', (err: any) => {
-    const msg = String(err?.message || '');
-    if (err?.code === 'EADDRINUSE' || msg.includes('EADDRINUSE') || msg.includes('already in use')) {
-      console.warn(`[Server] Port ${PORT} busy during reload (EADDRINUSE). Continuing...`);
-      return;
+  if (shouldListen) {
+    const PORT = Number(process.env.PORT || 3000);
+    if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+      throw new Error(`Invalid PORT value: ${process.env.PORT}`);
     }
-    console.warn(`[Server] Port ${PORT} notice:`, msg || err);
-  });
 
-  process.on('SIGTERM', () => {
-    try { server.close(); } catch {}
-  });
-  process.on('SIGINT', () => {
-    try { server.close(); } catch {}
-  });
+    const server = app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 WIP NFT LIVE APP - Running on http://0.0.0.0:${PORT} (${isProd ? 'PRODUCTION' : 'DEVELOPMENT'})`);
+      console.log(`Fee Collector: ${FEE_COLLECTOR_ADDRESS} (Block 93415806) | Fee Wallet: ${FEE_WALLET}`);
+      console.log(`Collections: WIP (${WIP_COLLECTION}) & WIPLOGO (${LOGO_COLLECTION})`);
+      console.log('On-chain supply is read live from the configured Polygon collections.');
+    });
+
+    server.on('error', (err: any) => {
+      const msg = String(err?.message || '');
+      if (err?.code === 'EADDRINUSE' || msg.includes('EADDRINUSE') || msg.includes('already in use')) {
+        console.warn(`[Server] Port ${PORT} busy during reload (EADDRINUSE). Continuing...`);
+        return;
+      }
+      console.warn(`[Server] Port ${PORT} notice:`, msg || err);
+    });
+
+    process.on('SIGTERM', () => { try { server.close(); } catch {} });
+    process.on('SIGINT', () => { try { server.close(); } catch {} });
+  }
+  return app;
 }
 
-startServer();
+const isVercelRuntime = process.env.VERCEL === '1';
+const app = await startServer(!isVercelRuntime);
+export default app;

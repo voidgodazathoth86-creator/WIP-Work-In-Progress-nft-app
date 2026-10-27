@@ -55,6 +55,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
     importOnChainCollection,
     polygonBlockNumber
   } = useWeb3();
+  const catalogNfts = useMemo(() => nfts.filter(nft => nft.onChainVerified === true), [nfts]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedChainFilter, setSelectedChainFilter] = useState<string>('all');
@@ -62,7 +63,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'recent' | 'price_asc' | 'price_desc' | 'royalty_desc'>('recent');
-  const [onlyListed, setOnlyListed] = useState<boolean>(true);
+  const [onlyListed, setOnlyListed] = useState<boolean>(false);
   const [minPrice, setMinPrice] = useState<string>('');
   const [maxPrice, setMaxPrice] = useState<string>('');
   const [batchSizeConfig, setBatchSizeConfig] = useState<number>(12);
@@ -158,7 +159,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
   // Filtered & Sorted NFTs
   const filteredNFTs = useMemo(() => {
     const seenIds = new Set<string>();
-    return nfts.filter((nft) => {
+    return catalogNfts.filter((nft) => {
       if (!nft || !nft.id) return false;
       const lowerId = String(nft.id).toLowerCase();
       if (seenIds.has(lowerId)) return false;
@@ -200,16 +201,8 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
         }
       }
 
-      // Listed filter (WIP & Logo collection NFTs are ALWAYS visible in the marketplace)
-      const isWipOrLogoNFT = 
-        nft.collectionId === 'col-wip-polygon' ||
-        nft.collectionId === 'col-wip-logo-polygon' ||
-        nft.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
-        nft.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
-        (nft.collectionName && nft.collectionName.toLowerCase().includes('work in progress')) ||
-        (nft.collectionName && nft.collectionName.toLowerCase().includes('wip logo'));
-
-      if (onlyListed && !nft.isListed && !isWipOrLogoNFT) {
+      // Use confirmed listing records for every collection.
+      if (onlyListed && !nft.isListed) {
         return false;
       }
 
@@ -234,7 +227,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
       }
       return (b.createdAt || 0) - (a.createdAt || 0);
     });
-  }, [nfts, searchQuery, selectedChainFilter, selectedCollectionFilter, onlyListed, minPrice, maxPrice, sortBy]);
+  }, [catalogNfts, searchQuery, selectedChainFilter, selectedCollectionFilter, onlyListed, minPrice, maxPrice, sortBy]);
 
   // Infinite Scroll & Intersection Observer Hook
   const {
@@ -256,8 +249,8 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
   });
 
   // Aggregate stats
-  const totalListed = nfts.filter(n => n.isListed).length;
-  const avgRoyalty = (nfts.reduce((acc, n) => acc + (n.royaltyPercentage || 0), 0) / (nfts.length || 1)).toFixed(1);
+  const totalListed = catalogNfts.filter(n => n.isListed).length;
+  const avgRoyalty = (catalogNfts.reduce((acc, n) => acc + (n.royaltyPercentage || 0), 0) / (catalogNfts.length || 1)).toFixed(1);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto relative" id="marketplace-view">
@@ -357,12 +350,12 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
             <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-1.5 uppercase tracking-wider">
-              <span>Verified Polygon Smart Contract Collections</span>
+              <span>Tracked Polygon Collections</span>
               <ShieldCheck className="w-4 h-4 text-cyan-400" />
             </h2>
           </div>
           <span className="text-[11px] text-zinc-400">
-            Enforced 10% secondary royalties • 0% marketplace protocol fee
+            Live collection and token metadata
           </span>
         </div>
 
@@ -370,13 +363,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
           {/* Work In Progress - WIP Collection Card */}
           <div 
             onClick={() => {
-              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-polygon' ? 'all' : 'col-wip-polygon');
+              setSelectedCollectionFilter(selectedCollectionFilter === WIP_COLLECTION.contractAddress ? 'all' : WIP_COLLECTION.contractAddress);
               if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
                 setSelectedChainFilter('all');
               }
             }}
             className={`p-5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
-              selectedCollectionFilter === 'col-wip-polygon'
+              selectedCollectionFilter === WIP_COLLECTION.contractAddress
                 ? 'bg-cyan-950/40 border-cyan-500/60 ring-1 ring-cyan-500/40 shadow-lg shadow-cyan-950/40'
                 : 'bg-zinc-900/80 border-zinc-800 hover:border-cyan-500/40 hover:bg-zinc-900'
             }`}
@@ -388,24 +381,25 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
                     Polygon (137)
                   </span>
                   <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px] font-bold">
-                    10% Royalty
+                    ERC-721
                   </span>
                   <span className="text-[10px] font-mono text-zinc-400">Symbol: WIP</span>
                 </div>
                 <h3 className="text-base font-bold text-white group-hover:text-cyan-300 transition-colors flex items-center gap-1.5">
                   Work In Progress - WIP Collection
-                  <CheckCircle2 className="w-4 h-4 text-cyan-400 inline shrink-0" />
+                  {collections.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase())?.verified && <CheckCircle2 className="w-4 h-4 text-cyan-400 inline shrink-0" />}
                 </h3>
                 <p className="text-xs text-zinc-400 line-clamp-2">
-                  Original generative iterations and genesis blueprints on Polygon smart contract with automated secondary royalties.
+                  Polygon collection. Token IDs, owners, and metadata are read from the deployed contract.
                 </p>
               </div>
 
               <div className="text-right shrink-0">
-                <div className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">Floor Price</div>
-                <div className="text-lg font-black text-white font-mono">25.0 MATIC</div>
+                <div className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">On-chain supply</div>
+                <div className="text-lg font-black text-white font-mono">{collections.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase())?.currentSupply ?? 5} / 1000</div>
+                <div className="text-[10px] text-cyan-300 font-mono">Next: #{String(collections.find(c => c.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase())?.currentSupply ?? 5).padStart(2, '0')} (Manual Jump)</div>
                 <div className="text-[10px] text-cyan-400 font-mono">
-                  {nfts.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length} in Marketplace
+                  {catalogNfts.filter(n => n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length} indexed items
                 </div>
               </div>
             </div>
@@ -454,11 +448,11 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
                   Mint to WIP
                 </button>
                 <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                  selectedCollectionFilter === 'col-wip-polygon'
+                  selectedCollectionFilter === WIP_COLLECTION.contractAddress
                     ? 'bg-cyan-500 text-black shadow-sm'
                     : 'bg-zinc-800 text-zinc-300 hover:text-white'
                 }`}>
-                  {selectedCollectionFilter === 'col-wip-polygon' ? 'Filtered Active' : 'Filter Collection'}
+                  {selectedCollectionFilter === WIP_COLLECTION.contractAddress ? 'Filtered Active' : 'Filter Collection'}
                 </span>
               </div>
             </div>
@@ -467,13 +461,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
           {/* WIP Logo Collection Card */}
           <div 
             onClick={() => {
-              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-logo-polygon' ? 'all' : 'col-wip-logo-polygon');
+              setSelectedCollectionFilter(selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress ? 'all' : WIP_LOGO_COLLECTION.contractAddress);
               if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
                 setSelectedChainFilter('all');
               }
             }}
             className={`p-5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
-              selectedCollectionFilter === 'col-wip-logo-polygon'
+              selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress
                 ? 'bg-purple-950/40 border-purple-500/60 ring-1 ring-purple-500/40 shadow-lg shadow-purple-950/40'
                 : 'bg-zinc-900/80 border-zinc-800 hover:border-purple-500/40 hover:bg-zinc-900'
             }`}
@@ -485,13 +479,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
                     Polygon (137)
                   </span>
                   <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px] font-bold">
-                    10% Royalty
+                    ERC-721
                   </span>
                   <span className="text-[10px] font-mono text-zinc-400">Symbol: WIPLOGO</span>
                 </div>
                 <h3 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
                   WIP Logo Collection
-                  <CheckCircle2 className="w-4 h-4 text-purple-400 inline shrink-0" />
+                  {collections.find(c => c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase())?.verified && <CheckCircle2 className="w-4 h-4 text-purple-400 inline shrink-0" />}
                 </h3>
                 <p className="text-xs text-zinc-400 line-clamp-2">
                   Official insignia, genesis monograms, and emblem prints from the WIP Logo Polygon smart contract.
@@ -499,10 +493,11 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
               </div>
 
               <div className="text-right shrink-0">
-                <div className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">Floor Price</div>
-                <div className="text-lg font-black text-white font-mono">50.0 MATIC</div>
+                <div className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">On-chain supply</div>
+                <div className="text-lg font-black text-white font-mono">{collections.find(c => c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase())?.currentSupply ?? 0} / 1000</div>
+                <div className="text-[10px] text-purple-300 font-mono">Next: #{String(collections.find(c => c.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase())?.currentSupply ?? 0)}</div>
                 <div className="text-[10px] text-purple-400 font-mono">
-                  {nfts.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length} in Marketplace
+                  {catalogNfts.filter(n => n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length} indexed items
                 </div>
               </div>
             </div>
@@ -551,11 +546,11 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
                   Mint to Logo
                 </button>
                 <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                  selectedCollectionFilter === 'col-wip-logo-polygon'
+                  selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress
                     ? 'bg-purple-500 text-white shadow-sm'
                     : 'bg-zinc-800 text-zinc-300 hover:text-white'
                 }`}>
-                  {selectedCollectionFilter === 'col-wip-logo-polygon' ? 'Filtered Active' : 'Filter Collection'}
+                  {selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress ? 'Filtered Active' : 'Filter Collection'}
                 </span>
               </div>
             </div>
@@ -576,7 +571,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-zinc-100 uppercase tracking-wider">
-                WIP Auto-Sync Engine
+                Collection Auto-Sync
               </span>
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                 {autoSyncEnabled ? 'LIVE AUTO-SYNC' : 'PAUSED'}
@@ -588,54 +583,24 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
               )}
             </div>
             <p className="text-[11px] text-zinc-400">
-              New mints to <span className="text-cyan-300 font-semibold">Work In Progress - WIP</span> and <span className="text-purple-300 font-semibold">WIP Logo</span> are automatically added and always visible in the marketplace.
+              Tracked Polygon collections refresh automatically; listed status comes from recorded marketplace listings.
             </p>
           </div>
         </div>
 
         <div className="flex items-center flex-wrap gap-2 w-full md:w-auto justify-between md:justify-end">
-          {/* Quick Collection Count Badges */}
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-polygon' ? 'all' : 'col-wip-polygon')}
-              className={`px-2 py-1 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 cursor-pointer ${
-                selectedCollectionFilter === 'col-wip-polygon'
-                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-200 shadow-sm'
-                  : 'bg-zinc-950/70 border-zinc-800 text-zinc-300 hover:border-cyan-500/40'
-              }`}
-              title="Filter to Work In Progress - WIP"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-              <span>WIP:</span>
-              <span className="font-mono text-cyan-300 font-bold">{nfts.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length}</span>
-            </button>
-
-            <button
-              onClick={() => setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-logo-polygon' ? 'all' : 'col-wip-logo-polygon')}
-              className={`px-2 py-1 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 cursor-pointer ${
-                selectedCollectionFilter === 'col-wip-logo-polygon'
-                  ? 'bg-purple-500/20 border-purple-500 text-purple-200 shadow-sm'
-                  : 'bg-zinc-950/70 border-zinc-800 text-zinc-300 hover:border-purple-500/40'
-              }`}
-              title="Filter to WIP Logo Collection"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-              <span>Logo:</span>
-              <span className="font-mono text-purple-300 font-bold">{nfts.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length}</span>
-            </button>
-          </div>
 
           {/* Polygon Block Height Badge */}
           <a
-            href={`https://polygonscan.com/block/${polygonBlockNumber}`}
+            href={polygonBlockNumber ? `https://polygonscan.com/block/${polygonBlockNumber}` : undefined}
             target="_blank"
             rel="noopener noreferrer"
             className="px-2.5 py-1.5 rounded-xl bg-purple-950/40 hover:bg-purple-900/50 border border-purple-500/30 text-purple-300 hover:text-purple-100 text-xs font-mono font-semibold transition-all flex items-center gap-1.5 shadow-sm"
-            title="View latest verified Polygon block on Polygonscan"
+            title={polygonBlockNumber ? 'View latest Polygon block on Polygonscan' : 'Waiting for Polygon RPC'}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-            <span>Block #{polygonBlockNumber.toLocaleString()}</span>
-            <ExternalLink className="w-3 h-3 text-purple-400 opacity-70" />
+            <span>{polygonBlockNumber ? `Block #${polygonBlockNumber.toLocaleString()}` : 'Polygon block unavailable'}</span>
+            {polygonBlockNumber > 0 && <ExternalLink className="w-3 h-3 text-purple-400 opacity-70" />}
           </a>
 
           {/* Import from Polygonscan Button */}
@@ -805,11 +770,11 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            All Chains ({nfts.length})
+            All Chains ({catalogNfts.length})
           </button>
 
           {Object.values(SUPPORTED_CHAINS).map((chain) => {
-            const count = nfts.filter(n => n.chainId === chain.id).length;
+            const count = catalogNfts.filter(n => n.chainId === chain.id).length;
             const isSelected = selectedChainFilter === chain.id;
             return (
               <button
@@ -853,13 +818,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
           <button
             id="marketplace-filter-col-wip"
             onClick={() => {
-              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-polygon' ? 'all' : 'col-wip-polygon');
+              setSelectedCollectionFilter(selectedCollectionFilter === WIP_COLLECTION.contractAddress ? 'all' : WIP_COLLECTION.contractAddress);
               if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
                 setSelectedChainFilter('all');
               }
             }}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-              selectedCollectionFilter === 'col-wip-polygon'
+              selectedCollectionFilter === WIP_COLLECTION.contractAddress
                 ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/60 shadow-sm'
                 : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-cyan-500/40 hover:text-zinc-200'
             }`}
@@ -867,7 +832,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
             <span>Work In Progress - WIP</span>
             <span className="text-[10px] font-mono text-cyan-400">
-              ({nfts.filter(n => n.collectionId === 'col-wip-polygon' || n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length})
+              ({catalogNfts.filter(n => n.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()).length})
             </span>
           </button>
 
@@ -875,13 +840,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
           <button
             id="marketplace-filter-col-wip-logo"
             onClick={() => {
-              setSelectedCollectionFilter(selectedCollectionFilter === 'col-wip-logo-polygon' ? 'all' : 'col-wip-logo-polygon');
+              setSelectedCollectionFilter(selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress ? 'all' : WIP_LOGO_COLLECTION.contractAddress);
               if (selectedChainFilter !== 'all' && selectedChainFilter !== 'polygon') {
                 setSelectedChainFilter('all');
               }
             }}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-              selectedCollectionFilter === 'col-wip-logo-polygon'
+              selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress
                 ? 'bg-purple-500/20 text-purple-200 border border-purple-500/60 shadow-sm'
                 : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-purple-500/40 hover:text-zinc-200'
             }`}
@@ -889,16 +854,15 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
             <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
             <span>WIP Logo Collection</span>
             <span className="text-[10px] font-mono text-purple-400">
-              ({nfts.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length})
+              ({catalogNfts.filter(n => n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length})
             </span>
           </button>
 
           {/* Other Collections */}
           {collections
-            .filter(c => c.id !== 'col-wip-polygon' && c.id !== 'col-wip-logo-polygon' && c.contractAddress !== WIP_COLLECTION.contractAddress && c.contractAddress !== WIP_LOGO_COLLECTION.contractAddress)
+            .filter(c => c.contractAddress.toLowerCase() !== WIP_COLLECTION.contractAddress.toLowerCase() && c.contractAddress.toLowerCase() !== WIP_LOGO_COLLECTION.contractAddress.toLowerCase())
             .map(col => {
-              const count = nfts.filter(n => n.collectionId === col.id || n.contractAddress?.toLowerCase() === col.contractAddress.toLowerCase()).length;
-              if (count === 0) return null;
+              const count = catalogNfts.filter(n => n.collectionId === col.id || n.contractAddress?.toLowerCase() === col.contractAddress.toLowerCase()).length;
               const isSelected = selectedCollectionFilter === col.id;
               return (
                 <button
@@ -924,9 +888,9 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-cyan-400" />
                 <span className="font-bold text-white">
-                  {selectedCollectionFilter === 'col-wip-polygon'
+                  {selectedCollectionFilter === WIP_COLLECTION.contractAddress
                     ? 'Work In Progress - WIP Collection'
-                    : selectedCollectionFilter === 'col-wip-logo-polygon'
+                    : selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress
                     ? 'WIP Logo Collection'
                     : collections.find(c => c.id === selectedCollectionFilter)?.name || 'Filtered Collection'}
                 </span>
@@ -936,9 +900,9 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ onSelectNFT, onOpenMin
               <div className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 bg-zinc-900 px-2.5 py-1 rounded-lg border border-zinc-800">
                 <span className="text-zinc-500">Contract:</span>
                 <span className="text-zinc-200 font-semibold">
-                  {selectedCollectionFilter === 'col-wip-polygon'
+                  {selectedCollectionFilter === WIP_COLLECTION.contractAddress
                     ? WIP_COLLECTION.contractAddress
-                    : selectedCollectionFilter === 'col-wip-logo-polygon'
+                    : selectedCollectionFilter === WIP_LOGO_COLLECTION.contractAddress
                     ? WIP_LOGO_COLLECTION.contractAddress
                     : collections.find(c => c.id === selectedCollectionFilter)?.contractAddress || ''}
                 </span>

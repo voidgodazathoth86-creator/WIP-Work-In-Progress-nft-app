@@ -30,12 +30,19 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
     >
       {/* Media Image Container */}
       <div className="relative aspect-square w-full overflow-hidden bg-zinc-950">
-        <img
-          src={nft.image}
-          alt={nft.name}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          loading="lazy"
-        />
+        {nft.image ? (
+          <img
+            src={nft.image}
+            alt={nft.name}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            loading="lazy"
+            onError={(event) => { event.currentTarget.style.display = 'none'; }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-900 to-zinc-950 text-center p-6">
+            <span className="text-xs text-zinc-500">Metadata image unavailable</span>
+          </div>
+        )}
 
         {/* Chain Badge */}
         <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-950/85 backdrop-blur-md border border-zinc-800 text-[11px] font-bold text-zinc-200 shadow-md">
@@ -47,7 +54,7 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
         <div className="absolute top-2.5 right-2.5 flex flex-col items-end gap-1">
           {isWip && (
             <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-950/85 backdrop-blur-md border border-blue-500/40 text-[9px] font-bold text-blue-300 shadow-md font-mono">
-              <span>WIP • 10%</span>
+              <span>WIP</span>
             </div>
           )}
           {nft.royaltyPercentage > 0 && !isWip && (
@@ -96,7 +103,7 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
         </div>
 
         {/* On-Chain Polygonscan Explorer Link */}
-        {nft.contractAddress && (
+        {nft.contractAddress && nft.onChainVerified && (
           <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between text-[10px] text-zinc-500 font-mono">
             <span className="flex items-center gap-1 text-emerald-400 font-semibold">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />

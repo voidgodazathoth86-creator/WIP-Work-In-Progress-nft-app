@@ -5,6 +5,7 @@ export const WIP_COLLECTION = {
   chainId: 137,
   chainName: "Polygon",
   contractAddress: "0xc2eaa64D089a625A9e245c15659eF5A7EA1f5ef9" as const,
+  maxSupply: 1000,
   royaltyBps: 1000,
   royaltyReceiver: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762" as const,
   marketplaceFeeBps: 0,
@@ -18,6 +19,7 @@ export const WIP_LOGO_COLLECTION = {
   chainId: 137,
   chainName: "Polygon",
   contractAddress: "0x675fD85FbcB13CE8080DBba780424A9e571B7f46" as const,
+  maxSupply: 1000,
   royaltyBps: 1000,
   royaltyReceiver: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762" as const,
   marketplaceFeeBps: 0,
@@ -36,6 +38,12 @@ export const COLLECTION_FACTORY_1000 = {
   royaltyBps: 1000,
   royaltyReceiver: "0xBaB06d358B181eB16e3189525BCc0bc4761a3762" as const,
   polygonScanUrl: "https://polygonscan.com/address/0x663DDf8888B72eC54EE7bfbecC952Fc711BD2e37"
+};
+
+export const WIP_FACTORY = {
+  address: "0xf685aB23b69364AaF5Eae3C6e6cA2ff53E69E097" as const,
+  chainId: 137,
+  polygonScanUrl: "https://polygonscan.com/address/0xf685aB23b69364AaF5Eae3C6e6cA2ff53E69E097",
 };
 
 export const ENFORCE_ROYALTIES = true;

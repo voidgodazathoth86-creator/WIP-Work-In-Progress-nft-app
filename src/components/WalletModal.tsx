@@ -199,18 +199,6 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, openF
                     </div>
                   </div>
                 </div>
-
-                {/* Faucet Quick Top-up Button */}
-                <button
-                  onClick={() => {
-                    claimFaucetTokens(activeChain);
-                  }}
-                  id="wallet-quick-faucet-btn"
-                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-semibold transition-all"
-                >
-                  <Droplet className="w-3.5 h-3.5 text-indigo-400" />
-                  Claim +{currentChainConfig.faucetAmount} {currentChainConfig.faucetSymbol} Testnet Tokens
-                </button>
               </div>
 
               {/* Private Key / Security Box */}

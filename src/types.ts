@@ -106,6 +106,7 @@ export interface NFT {
   ipfsMetadataUri: string;
   ipfsImageUri: string;
   contractAddress: string;
+  onChainVerified?: boolean;
   txHash: string;
   editionTotal?: number;
   editionNumber?: number;

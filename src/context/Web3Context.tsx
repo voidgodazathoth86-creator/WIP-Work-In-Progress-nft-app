@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import { createPublicClient, createWalletClient, custom, decodeEventLog, getAddress, zeroAddress } from 'viem';
+import { polygon } from 'viem/chains';
 import { 
   BlockchainNetwork, 
   ChainConfig, 
@@ -20,13 +22,12 @@ import {
   BatchRoyaltyResult
 } from '../types';
 import { SUPPORTED_CHAINS, CHAIN_LIST } from '../data/chains';
-import { INITIAL_COLLECTIONS, INITIAL_NFTS, INITIAL_ROYALTY_LOGS, INITIAL_TRANSACTIONS } from '../data/mockData';
+import { INITIAL_COLLECTIONS, INITIAL_NFTS, INITIAL_ROYALTY_LOGS, INITIAL_TRANSACTIONS } from '../data/catalogDefaults';
 import { calculateGasTiers } from '../services/gasService';
 import { 
   BRIDGE_PROTOCOLS, 
   INITIAL_BRIDGE_TRANSACTIONS, 
   calculateBridgeQuote, 
-  generateRandomHex, 
   getBridgedContractAddress, 
   getRequiredConfirmations 
 } from '../services/bridgeService';
@@ -34,47 +35,54 @@ import {
   WIP_COLLECTION, 
   WIP_LOGO_COLLECTION, 
   COLLECTION_FACTORY_1000, 
+  WIP_FACTORY,
   ENFORCE_ROYALTIES, 
   ROYALTY_WALLET,
   WIP_AUTHORIZED_MINTERS,
   isAuthorizedWipMinter
 } from '../config/wipCollection';
-import { factoryABI } from '../abi/factoryABI';
+import { collectionFactoryAbi, logoCollectionAbi, wipCollectionAbi, wipFactoryAbi } from '../abi/polygonContracts';
+
+const polygonTransferAbi = [{ type: 'event', name: 'Transfer', anonymous: false, inputs: [{ indexed: true, name: 'from', type: 'address' }, { indexed: true, name: 'to', type: 'address' }, { indexed: true, name: 'tokenId', type: 'uint256' }] }] as const;
+
+function encodeJsonDataUri(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return `data:application/json;base64,${btoa(binary)}`;
+}
+
+async function getConnectedPolygonClients(accountAddress: string): Promise<{ wallet: any; public: any; account: `0x${string}` }> {
+  if (typeof window === 'undefined') throw new Error('Connect a Polygon wallet to continue.');
+  const win = window as any;
+  const providers = Array.from(new Set([
+    ...(Array.isArray(win.ethereum?.providers) ? win.ethereum.providers : []),
+    win.ethereum,
+    win.coinbaseWalletExtension,
+    win.phantom?.ethereum,
+  ].filter(Boolean)));
+  for (const provider of providers) {
+    if (!provider || typeof provider.request !== 'function') continue;
+    const accounts = await provider.request({ method: 'eth_accounts' }).catch(() => []);
+    if (!Array.isArray(accounts) || !accounts.some((address: string) => address.toLowerCase() === accountAddress.toLowerCase())) continue;
+    const chainId = Number.parseInt(await provider.request({ method: 'eth_chainId' }), 16);
+    if (chainId !== 137) throw new Error('Switch your wallet to Polygon Mainnet (chain 137), then try again.');
+    const account = getAddress(accountAddress);
+    return {
+      wallet: createWalletClient({ account, chain: polygon, transport: custom(provider) }),
+      public: createPublicClient({ chain: polygon, transport: custom(provider) }),
+      account,
+    };
+  }
+  throw new Error('Reconnect the currently selected wallet before submitting a Polygon transaction.');
+}
 
 // Verified On-Chain Polygon Creator Wallets & Web3 Keyring
 export const AUTHORIZED_ACCOUNTS: WalletAccount[] = [
-  {
-    address: ROYALTY_WALLET,
-    name: 'WIP Authorized Creator (0xBaB0...)',
-    avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=150&q=80',
-    type: 'authorized',
-    providerName: 'Polygon Mainnet',
-    balances: {
-      ethereum: 1.20,
-      polygon: 125.0,
-      arbitrum: 0.5,
-      base: 0.8,
-      solana: 5.0,
-      avalanche: 10.0,
-      bsc: 1.0,
-    },
-  },
-  {
-    address: '0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0',
-    name: 'WIP Authorized Co-Creator (0xB30e...)',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-    type: 'authorized',
-    providerName: 'Polygon Mainnet',
-    balances: {
-      ethereum: 4.50,
-      polygon: 350.0,
-      arbitrum: 2.10,
-      base: 1.50,
-      solana: 12.0,
-      avalanche: 35.0,
-      bsc: 3.5,
-    },
-  },
+  // Wallets must be connected through an injected provider. Never seed private-looking
+  // accounts or balances into a production session.
 ];
 
 export const DEMO_ACCOUNTS = AUTHORIZED_ACCOUNTS;
@@ -123,7 +131,7 @@ interface Web3ContextType {
   polygonBlockNumber: number;
 
   // Actions
-  mintNFT: (nftData: Partial<NFT>, gasSpeed?: 'slow' | 'standard' | 'fast' | 'instant') => Promise<{ success: boolean; nft?: NFT; txHash?: string; error?: string }>;
+  mintNFT: (nftData: Partial<NFT>, gasSpeed?: 'slow' | 'standard' | 'fast' | 'instant', onSubmitted?: (txHash: string) => void) => Promise<{ success: boolean; nft?: NFT; txHash?: string; error?: string }>;
   bulkMintNFTs: (
     items: BulkNFTItem[],
     config: BulkMintConfig,
@@ -137,7 +145,7 @@ interface Web3ContextType {
     totalGasUsedUsd?: number;
     error?: string;
   }>;
-  deployCollection: (collectionData: Partial<NFTCollection>) => Promise<{ success: boolean; collection?: NFTCollection; txHash?: string; error?: string }>;
+  deployCollection: (collectionData: Partial<NFTCollection>, onSubmitted?: (txHash: string) => void, factoryType?: 'collection' | 'wip') => Promise<{ success: boolean; collection?: NFTCollection; txHash?: string; error?: string }>;
   listNFTForSale: (nftId: string, price: number) => Promise<boolean>;
   delistNFT: (nftId: string) => Promise<boolean>;
   buyNFT: (nftId: string) => Promise<{ success: boolean; royaltyPaid?: number; error?: string; txHash?: string }>;
@@ -174,15 +182,15 @@ interface Web3ContextType {
 const Web3Context = createContext<Web3ContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  NFTS: 'crosschain_nft_platform_nfts_v2_live',
-  COLLECTIONS: 'crosschain_nft_platform_collections_v2_live',
-  TRANSACTIONS: 'crosschain_nft_platform_txs_v2_live',
-  ROYALTIES: 'crosschain_nft_platform_royalties_v2_live',
+  NFTS: 'crosschain_nft_platform_nfts_v3_chain_indexed',
+  COLLECTIONS: 'crosschain_nft_platform_collections_v3_chain_indexed',
+  TRANSACTIONS: 'crosschain_nft_platform_txs_v3_chain_only',
+  ROYALTIES: 'crosschain_nft_platform_royalties_v3_chain_only',
   ACTIVE_CHAIN: 'crosschain_nft_platform_active_chain',
   NETWORK_MODE: 'crosschain_nft_platform_network_mode',
   WALLET_INDEX: 'crosschain_nft_platform_wallet_index',
-  BALANCES: 'crosschain_nft_platform_wallet_balances_v2_live',
-  BRIDGE_TXS: 'crosschain_nft_platform_bridge_txs_v2_live',
+  BALANCES: 'crosschain_nft_platform_wallet_balances_v3_chain_only',
+  BRIDGE_TXS: 'crosschain_nft_platform_bridge_txs_v3_chain_only',
 };
 
 const safeGetItem = (key: string): string | null => {
@@ -277,8 +285,8 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return saved ? parseInt(saved, 10) : 0;
   });
 
-  const [isConnected, setIsConnected] = useState<boolean>(true);
-  const [polygonBlockNumber, setPolygonBlockNumber] = useState<number>(96175500);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [polygonBlockNumber, setPolygonBlockNumber] = useState<number>(0);
 
   // Gas Engine State
   const [selectedGasSpeed, setSelectedGasSpeed] = useState<'slow' | 'standard' | 'fast' | 'instant'>('standard');
@@ -360,7 +368,10 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [transactions, setTransactions] = useState<TransactionRecord[]>(() => {
     const saved = safeGetItem(STORAGE_KEYS.TRANSACTIONS);
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed.filter(tx => typeof tx?.txHash === 'string' && /^0x[a-f0-9]{64}$/i.test(tx.txHash)) : [];
+      } catch {}
     }
     return INITIAL_TRANSACTIONS;
   });
@@ -368,7 +379,10 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [royaltyLogs, setRoyaltyLogs] = useState<RoyaltyPayoutRecord[]>(() => {
     const saved = safeGetItem(STORAGE_KEYS.ROYALTIES);
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed.filter(log => typeof log?.txHash === 'string' && /^0x[a-f0-9]{64}$/i.test(log.txHash)) : [];
+      } catch {}
     }
     return INITIAL_ROYALTY_LOGS;
   });
@@ -424,12 +438,19 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     safeSetItem(STORAGE_KEYS.BALANCES, JSON.stringify(balanceMap));
   }, [accounts]);
 
-  const activeAccount = accounts[activeAccountIndex] || accounts[0];
+  const activeAccount = accounts[activeAccountIndex] || accounts[0] || {
+    address: '0x0000000000000000000000000000000000000000',
+    name: 'Wallet not connected',
+    avatar: '',
+    type: 'watcher' as const,
+    providerName: 'None',
+    balances: { ethereum: 0, polygon: 0, arbitrum: 0, base: 0, solana: 0, avalanche: 0, bsc: 0 },
+  };
 
   // === AUTO-SYNC WORK IN PROGRESS - WIP & LOGO COLLECTIONS ===
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
-  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<number | null>(() => Date.now());
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<number | null>(null);
 
   const wipTotalCount = nfts.filter(n => 
     n.collectionId === 'col-wip-polygon' || 
@@ -447,6 +468,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let newItemsAdded = 0;
     let finalWipCount = 0;
     let finalLogoCount = 0;
+    let syncSucceeded = false;
 
     try {
       let tokensFromBackend: any[] = [];
@@ -461,6 +483,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const json = await wipRes.value.json();
           if (json.success && Array.isArray(json.tokens)) {
             tokensFromBackend.push(...json.tokens);
+            syncSucceeded = true;
           }
         }
 
@@ -471,12 +494,14 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
           if (json.success && Array.isArray(json.tokens)) {
             tokensFromBackend.push(...json.tokens);
+            syncSucceeded = true;
           }
         }
 
         if (colRes.status === 'fulfilled' && colRes.value.ok) {
           const json = await colRes.value.json();
           if (json.success && Array.isArray(json.collections)) {
+            syncSucceeded = true;
             setCollections(prevCols => {
               const prevMap = new Map<string, NFTCollection>(prevCols.map(c => [c.contractAddress?.toLowerCase() || c.id.toLowerCase(), c]));
               for (const col of (json.collections as any[])) {
@@ -484,7 +509,14 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 if (!key) continue;
                 const existing = prevMap.get(key);
                 if (existing) {
-                  prevMap.set(key, { ...existing, currentSupply: Number(col.currentSupply) || existing.currentSupply, verified: true });
+                  prevMap.set(key, {
+                    ...existing,
+                    name: col.name || existing.name,
+                    symbol: col.symbol || existing.symbol,
+                    currentSupply: Number.isFinite(Number(col.currentSupply)) ? Number(col.currentSupply) : existing.currentSupply,
+                    maxSupply: Number.isFinite(Number(col.maxSupply)) && Number(col.maxSupply) > 0 ? Number(col.maxSupply) : existing.maxSupply,
+                    verified: true,
+                  });
                 } else {
                   prevMap.set(key, {
                     id: col.id || col.contractAddress?.toLowerCase(),
@@ -492,22 +524,22 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     name: col.name,
                     symbol: col.symbol,
                     description: col.description || '',
-                    bannerImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
-                    avatarImage: 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=400&q=80',
+                    bannerImage: '',
+                    avatarImage: '',
                     chainId: 'polygon',
                     standard: 'ERC-721',
                     creatorAddress: col.creatorAddress || col.owner,
                     creatorName: col.creatorName || 'Verified Polygon Creator',
-                    royaltyPercentage: col.royaltyPercentage || 10.0,
+                    royaltyPercentage: Number(col.royaltyPercentage) || 0,
                     royaltyPayoutAddress: col.royaltyPayoutAddress || col.royaltyReceiver || col.owner,
                     category: col.category || 'art',
-                    maxSupply: 1000,
-                    currentSupply: Number(col.currentSupply) || 1,
-                    floorPrice: 25.0,
-                    totalVolume: 50000,
-                    ownersCount: 2,
-                    createdAt: Date.now(),
-                    verified: true,
+                    maxSupply: Number(col.maxSupply) || (String(col.contractAddress || '').toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() || String(col.contractAddress || '').toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ? 1000 : 0),
+                    currentSupply: Number(col.currentSupply) || 0,
+                    floorPrice: Number(col.floorPrice) || 0,
+                    totalVolume: Number(col.totalVolume) || 0,
+                    ownersCount: Number(col.ownersCount) || 0,
+                    createdAt: Number(col.createdAt) || 0,
+                    verified: Boolean(col.verified),
                   });
                 }
               }
@@ -566,81 +598,76 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         }
 
-        // Process remote tokens from backend
+        // Treat the chain/database snapshot as the source of truth for token data.
         const newRemoteNFTs: NFT[] = [];
+        const seenRemoteTokenKeys = new Set<string>();
         for (const t of tokensFromBackend) {
-          const rawId = String(t.id || t.token_id || t.tokenId || '');
-          const targetId = t.id 
-            ? (String(t.id).startsWith('nft-') ? String(t.id) : `nft-${t.id}`)
-            : `nft-live-${t.tokenId !== undefined ? t.tokenId : (t.token_id !== undefined ? String(t.token_id).replace(/^#/, '') : 0)}`;
+          if (t.source !== 'on-chain') continue;
+          const contractAddr = String(t.contract_address || t.contractAddress || '').trim();
+          const cleanTokenId = String(t.token_id ?? t.tokenId ?? '').replace(/^#/, '').trim();
+          if (!/^0x[a-fA-F0-9]{40}$/.test(contractAddr) || !/^\d+$/.test(cleanTokenId)) continue;
+          const tokenKey = `${contractAddr.toLowerCase()}:${cleanTokenId}`;
+          if (seenRemoteTokenKeys.has(tokenKey)) continue;
+          seenRemoteTokenKeys.add(tokenKey);
+          const targetId = `nft-chain-${contractAddr.slice(2).toLowerCase()}-${cleanTokenId}`;
 
-          const lowerTargetId = targetId.toLowerCase();
-          if (seenIdSet.has(lowerTargetId)) continue;
-          if (t.id && seenIdSet.has(String(t.id).toLowerCase())) continue;
-          if (t.id && seenIdSet.has(`nft-${t.id}`.toLowerCase())) continue;
-
-          // Check contractAddress + tokenId
-          const contractAddr = t.contract_address || WIP_COLLECTION.contractAddress;
-          const cleanTokenId = String(t.token_id || t.tokenId || '').replace(/^#/, '').toLowerCase();
-          if (cleanTokenId) {
-            const tokenKey = `${contractAddr.toLowerCase()}:${cleanTokenId}`;
-            if (seenContractTokenSet.has(tokenKey)) {
-              continue;
-            }
-            seenContractTokenSet.add(tokenKey);
-          }
-
-          seenIdSet.add(lowerTargetId);
-
-          const isLogo = t.collection_id === 'col-wip-logo-polygon' || 
-            String(t.contract_address || '').toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
-            String(t.name || '').toLowerCase().includes('logo');
+          const isLogo = String(contractAddr).toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
           const col = isLogo ? WIP_LOGO_COLLECTION : WIP_COLLECTION;
+          const collectionId = String(t.collection_id || col.id);
+          const collectionName = String(t.collection_name || col.name);
+          const rawImage = String(t.image || t.image_ipfs_uri || '');
+          const image = rawImage.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${rawImage.slice(7)}` : rawImage.startsWith('ar://') ? `https://arweave.net/${rawImage.slice(5)}` : rawImage;
 
           const newNft: NFT = {
             id: targetId,
             tokenId: t.token_id ? (String(t.token_id).startsWith('#') ? t.token_id : `#${t.token_id}`) : (t.tokenId !== undefined ? `#${t.tokenId}` : `#0`),
             name: t.name || `${col.name} #${t.token_id ?? t.tokenId ?? 0}`,
-            description: t.description || `Official minted item in ${col.name} on Polygon. Auto-synchronized with 10% secondary royalty.`,
-            image: t.image || t.image_ipfs_uri || (isLogo ? 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80' : 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80'),
+            description: t.description || '',
+            image,
+            animationUrl: t.animation_url || undefined,
             chainId: 'polygon',
             standard: 'ERC-721',
-            collectionId: col.id,
-            collectionName: col.name,
-            creatorAddress: col.royaltyReceiver,
-            creatorName: 'WIP Collective',
-            ownerAddress: t.owner_wallet || activeAccount.address,
-            ownerName: t.owner_wallet ? `${t.owner_wallet.slice(0, 6)}...${t.owner_wallet.slice(-4)}` : activeAccount.name,
-            royaltyPercentage: col.royaltyBps / 100,
-            royaltyPayoutAddress: col.royaltyReceiver,
-            price: t.price || (isLogo ? 50.0 : 25.0),
-            isListed: true,
-            listedAt: Date.now(),
-            createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
-            traits: t.traits || [
-              { trait_type: 'Collection', value: col.name, rarityPercentage: 5 },
-              { trait_type: 'Auto Sync Status', value: 'Live On-Chain Synchronized', rarityPercentage: 100 },
-              { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 },
-            ],
-            ipfsMetadataUri: t.metadata_ipfs_uri || `ipfs://QmWipAutoSync${Date.now()}`,
-            ipfsImageUri: t.image || t.image_ipfs_uri || `ipfs://QmWipAutoSyncImage${Date.now()}`,
-            contractAddress: col.contractAddress,
-            txHash: t.tx_hash || `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
+            collectionId,
+            collectionName,
+            creatorAddress: t.collection_creator_address || '',
+            creatorName: '',
+            ownerAddress: t.owner_wallet || '',
+            ownerName: t.owner_wallet ? `${t.owner_wallet.slice(0, 6)}...${t.owner_wallet.slice(-4)}` : '',
+            royaltyPercentage: Number(t.royalty_percentage) || 0,
+            royaltyPayoutAddress: t.royalty_receiver || '',
+            price: t.is_listed && t.price !== null && t.price !== undefined ? Number(t.price) : undefined,
+            isListed: Boolean(t.is_listed),
+            listedAt: t.is_listed && t.listed_at ? new Date(t.listed_at).getTime() : undefined,
+            createdAt: t.created_at ? new Date(t.created_at).getTime() : 0,
+            traits: Array.isArray(t.traits) ? t.traits.map((trait: any) => ({ trait_type: trait.trait_type, value: trait.value ?? trait.trait_value })) : [],
+            ipfsMetadataUri: t.metadata_ipfs_uri || '',
+            ipfsImageUri: t.image_ipfs_uri || '',
+            contractAddress: contractAddr,
+            onChainVerified: true,
+            txHash: t.tx_hash || '',
             editionTotal: 1,
             editionNumber: 1,
-            viewsCount: Math.floor(20 + Math.random()*150),
-            likesCount: Math.floor(Math.random()*40),
+            viewsCount: 0,
+            likesCount: 0,
           };
           newRemoteNFTs.push(newNft);
         }
 
-        const addedCount = missingInitialWip.length + newRemoteNFTs.length;
+        const currentTokenKeys = new Set(deduplicatedCurrent.map(n => n.contractAddress && n.tokenId
+          ? `${n.contractAddress.toLowerCase()}:${String(n.tokenId).replace(/^#/, '')}`
+          : '').filter(Boolean));
+        const addedCount = newRemoteNFTs.filter(n => !currentTokenKeys.has(`${n.contractAddress.toLowerCase()}:${String(n.tokenId).replace(/^#/, '')}`)).length;
         newItemsAdded = addedCount;
-
-        let merged = deduplicatedCurrent;
-        if (addedCount > 0) {
-          merged = [...newRemoteNFTs, ...missingInitialWip, ...deduplicatedCurrent];
-        }
+        const remoteByToken = new Map(newRemoteNFTs.map(n => [`${n.contractAddress.toLowerCase()}:${String(n.tokenId).replace(/^#/, '')}`, n]));
+        const refreshedCurrent = deduplicatedCurrent.map(existing => {
+          if (!existing.contractAddress || !existing.tokenId) return existing;
+          const key = `${existing.contractAddress.toLowerCase()}:${String(existing.tokenId).replace(/^#/, '')}`;
+          const fresh = remoteByToken.get(key);
+          if (!fresh) return existing;
+          remoteByToken.delete(key);
+          return { ...existing, ...fresh, id: existing.id, likesCount: existing.likesCount, viewsCount: existing.viewsCount };
+        });
+        const merged = [...remoteByToken.values(), ...missingInitialWip, ...refreshedCurrent];
 
         // Final strict deduplication pass
         const finalMap = new Map<string, NFT>();
@@ -655,7 +682,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         finalLogoCount = finalList.filter(n => n.collectionId === 'col-wip-logo-polygon' || n.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()).length;
 
         // If list was deduplicated or new items were added, update and persist
-        if (finalList.length !== currentNfts.length || addedCount > 0) {
+        if (JSON.stringify(finalList) !== JSON.stringify(currentNfts)) {
           safeSetItem(STORAGE_KEYS.NFTS, JSON.stringify(finalList));
           return finalList;
         }
@@ -663,19 +690,8 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return currentNfts;
       });
 
-      // Update collection supply
-      setCollections(prevCols => prevCols.map(col => {
-        if (col.id === 'col-wip-polygon' || col.contractAddress?.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase()) {
-          return { ...col, currentSupply: finalWipCount || col.currentSupply };
-        }
-        if (col.id === 'col-wip-logo-polygon' || col.contractAddress?.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase()) {
-          return { ...col, currentSupply: finalLogoCount || col.currentSupply };
-        }
-        return col;
-      }));
-
-      setLastSyncTimestamp(Date.now());
-      return { success: true, totalWipCount: finalWipCount + finalLogoCount, newCount: newItemsAdded };
+      if (syncSucceeded) setLastSyncTimestamp(Date.now());
+      return { success: syncSucceeded, totalWipCount: finalWipCount + finalLogoCount, newCount: newItemsAdded };
     } finally {
       if (!silent) {
         setTimeout(() => setIsAutoSyncing(false), 400);
@@ -846,9 +862,24 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const res = await Promise.race([requestPromise, timeoutPromise]);
             if (Array.isArray(res) && res.length > 0) {
               const injectedAddress = res[0];
+              const balances: WalletAccount['balances'] = {
+                ethereum: 0, polygon: 0, arbitrum: 0, base: 0, solana: 0, avalanche: 0, bsc: 0,
+              };
+              try {
+                const providerChainId = Number.parseInt(await provider.request({ method: 'eth_chainId' }), 16);
+                const providerChain = CHAIN_LIST.find(c => c.chainId === providerChainId || c.mainnetChainId === providerChainId);
+                if (providerChain) {
+                  const balanceHex = await provider.request({ method: 'eth_getBalance', params: [injectedAddress, 'latest'] });
+                  balances[providerChain.id] = Number(BigInt(balanceHex)) / 1e18;
+                  setActiveChain(providerChain.id);
+                }
+              } catch (balanceError) {
+                console.info('[Wallet] Could not read the connected account balance:', balanceError);
+              }
               const existing = accounts.find(a => a.address.toLowerCase() === injectedAddress.toLowerCase());
               if (existing) {
                 setActiveAccountIndex(accounts.indexOf(existing));
+                setAccounts(prev => prev.map(a => a.address.toLowerCase() === injectedAddress.toLowerCase() ? { ...a, balances } : a));
               } else {
                 const newAcc: WalletAccount = {
                   address: injectedAddress,
@@ -856,15 +887,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
                   type: 'injected',
                   providerName,
-                  balances: {
-                    ethereum: 1.85,
-                    polygon: 150.0,
-                    arbitrum: 1.2,
-                    base: 1.5,
-                    solana: 12.0,
-                    avalanche: 25.0,
-                    bsc: 3.5,
-                  },
+                  balances,
                 };
                 setAccounts(prev => [newAcc, ...prev]);
                 setActiveAccountIndex(0);
@@ -881,35 +904,8 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.warn(`Error resolving injected provider ${providerName}:`, e);
     }
 
-    // Seamless Sandbox/Testnet Session Connection (ensures users are never blocked in iframe preview)
-    const existingSim = accounts.find(a => a.providerName === providerName && a.type === 'injected');
-    if (existingSim) {
-      setActiveAccountIndex(accounts.indexOf(existingSim));
-      setIsConnected(true);
-      return true;
-    }
-
-    const simAddress = `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
-    const newAcc: WalletAccount = {
-      address: simAddress,
-      name: `${providerName} Wallet (${simAddress.slice(0, 6)}...${simAddress.slice(-4)})`,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-      type: 'injected',
-      providerName,
-      balances: {
-        ethereum: 3.5,
-        polygon: 250.0,
-        arbitrum: 2.0,
-        base: 2.5,
-        solana: 15.0,
-        avalanche: 30.0,
-        bsc: 3.0,
-      },
-    };
-    setAccounts(prev => [newAcc, ...prev]);
-    setActiveAccountIndex(0);
-    setIsConnected(true);
-    return true;
+    setIsConnected(false);
+    return false;
   };
 
   const connectAccount = (account: WalletAccount) => {
@@ -920,7 +916,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAccounts(prev => [...prev, account]);
       setActiveAccountIndex(accounts.length);
     }
-    setIsConnected(true);
+    setIsConnected(account.type === 'injected');
   };
 
   const connectDemoAccount = connectAccount;
@@ -953,7 +949,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     setAccounts(prev => [...prev, newWatcher]);
     setActiveAccountIndex(accounts.length);
-    setIsConnected(true);
+    setIsConnected(false);
   };
 
   const importOnChainCollection = async (contractAddress: string): Promise<{ success: boolean; collection?: NFTCollection; error?: string; tokensCount?: number }> => {
@@ -975,21 +971,21 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         name: c.name,
         symbol: c.symbol,
         description: c.description,
-        bannerImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
-        avatarImage: 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=400&q=80',
+        bannerImage: '',
+        avatarImage: '',
         chainId: 'polygon',
         standard: 'ERC-721',
         creatorAddress: c.owner,
-        creatorName: 'Verified Polygon Creator',
-        royaltyPercentage: c.royaltyPercentage || 10.0,
+        creatorName: '',
+        royaltyPercentage: Number(c.royaltyPercentage) || 0,
         royaltyPayoutAddress: c.royaltyReceiver || c.owner,
         category: c.category || 'art',
-        maxSupply: 1000,
+        maxSupply: Number(c.maxSupply) || (c.address.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() || c.address.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ? 1000 : 0),
         currentSupply: c.totalSupply || (c.tokens ? c.tokens.length : 0),
-        floorPrice: 25.0,
-        totalVolume: 50000,
-        ownersCount: 2,
-        createdAt: c.lastSyncedAt || Date.now(),
+        floorPrice: 0,
+        totalVolume: 0,
+        ownersCount: 0,
+        createdAt: 0,
         verified: true,
       };
 
@@ -1006,33 +1002,29 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
           id: `nft-poly-${c.address.slice(2, 8)}-${t.tokenId ?? t.token_id}`,
           tokenId: t.token_id ? (String(t.token_id).startsWith('#') ? t.token_id : `#${t.token_id}`) : (t.tokenId !== undefined ? `#${t.tokenId}` : `#0`),
           name: t.name || `${c.name} #${t.tokenId ?? t.token_id}`,
-          description: `Verified on-chain edition #${t.tokenId ?? t.token_id} from ${c.name} on Polygon. Indexed from Polygonscan & on-chain RPC.`,
-          image: t.image || t.image_ipfs_uri || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+          description: t.description || '',
+          image: t.image || '',
+          animationUrl: t.animation_url || undefined,
           chainId: 'polygon',
           standard: 'ERC-721',
           collectionId: importedCol.id,
           collectionName: importedCol.name,
           creatorAddress: importedCol.creatorAddress,
           creatorName: importedCol.creatorName,
-          ownerAddress: t.owner_wallet || importedCol.creatorAddress,
+          ownerAddress: t.owner_wallet || '',
           ownerName: t.owner_wallet ? `${t.owner_wallet.slice(0, 6)}...${t.owner_wallet.slice(-4)}` : 'On-Chain Holder',
           royaltyPercentage: importedCol.royaltyPercentage,
           royaltyPayoutAddress: importedCol.royaltyPayoutAddress,
-          price: 25.0,
-          isListed: true,
-          listedAt: Date.now(),
-          createdAt: Date.now(),
-          traits: [
-            { trait_type: 'Collection', value: c.name, rarityPercentage: 5 },
-            { trait_type: 'On-Chain Verified', value: 'Polygon Mainnet', rarityPercentage: 100 },
-            { trait_type: 'Polygonscan Indexed', value: 'Yes', rarityPercentage: 100 },
-          ],
+          isListed: false,
+          createdAt: 0,
+          traits: Array.isArray(t.traits) ? t.traits.map((trait: any) => ({ trait_type: trait.trait_type, value: trait.value ?? trait.trait_value })) : [],
           ipfsMetadataUri: t.metadata_ipfs_uri || '',
           ipfsImageUri: t.image_ipfs_uri || '',
           contractAddress: c.address,
-          txHash: `0x${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`,
-          viewsCount: 150,
-          likesCount: 25
+          onChainVerified: true,
+          txHash: '',
+          viewsCount: 0,
+          likesCount: 0
         }));
 
         setNfts(prev => {
@@ -1057,353 +1049,221 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const claimFaucetTokens = async (targetChain?: BlockchainNetwork): Promise<number> => {
-    const c = targetChain || activeChain;
-    const chainConfig = SUPPORTED_CHAINS[c];
-    const amount = chainConfig.faucetAmount;
-
-    setAccounts(prev => prev.map((acc, i) => {
-      if (i === activeAccountIndex) {
-        return {
-          ...acc,
-          balances: {
-            ...acc.balances,
-            [c]: (acc.balances[c] || 0) + amount,
-          },
-        };
-      }
-      return acc;
-    }));
-
-    // Record Faucet Transaction
-    const newTx: TransactionRecord = {
-      id: `tx-faucet-${Date.now()}`,
-      type: 'faucet',
-      txHash: `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
-      chainId: c,
-      fromAddress: `${chainConfig.name} Testnet Dispenser`,
-      toAddress: activeAccount.address,
-      amountCrypto: amount,
-      amountUsd: +(amount * chainConfig.usdPrice).toFixed(2),
-      gasUsedCrypto: 0,
-      gasUsedUsd: 0,
-      gasPriceGwei: 0,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-
-    setTransactions(prev => [newTx, ...prev]);
-    return amount;
+    void targetChain;
+    return 0;
   };
 
-  // MINT NFT METHOD
   const mintNFT = async (
-    nftData: Partial<NFT>, 
-    speed: 'slow' | 'standard' | 'fast' | 'instant' = selectedGasSpeed
+    nftData: Partial<NFT>,
+    _speed: 'slow' | 'standard' | 'fast' | 'instant' = selectedGasSpeed,
+    onSubmitted?: (txHash: string) => void,
   ): Promise<{ success: boolean; nft?: NFT; txHash?: string; error?: string }> => {
-    const targetChain = nftData.chainId || activeChain;
-    const chainConfig = SUPPORTED_CHAINS[targetChain];
-    const tier = gasData.tiers[speed];
-    const gasFee = tier.estCostCrypto;
-
-    const matchedCol = nftData.collectionId 
-      ? (collections.find(c => c.id === nftData.collectionId) || 
-         (nftData.collectionId === 'col-contract-1000' || nftData.collectionId === 'col-wip-1000' 
-           ? collections.find(c => c.id === 'col-contract-1000' || c.contractAddress.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase()) 
-           : undefined)) 
-      : undefined;
-    const contractAddr = nftData.contractAddress || matchedCol?.contractAddress || `0x${Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-
-    const isWip = 
-      nftData.collectionId === 'col-wip-polygon' || 
-      nftData.collectionId === 'col-wip-logo-polygon' ||
-      contractAddr.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
-      contractAddr.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase() ||
-      (!!nftData.collectionName && nftData.collectionName.toLowerCase().includes('work in progress') && !nftData.collectionName.toLowerCase().includes('collection contract'));
-
-    // STRICT PERMISSION LOCK:
-    // Only 0xBaB06d358B181eB16e3189525BCc0bc4761a3762 & 0xB30eE8937bB6488bE0b8EA702618a2D50Ba0C4b0 are allowed to mint to WIP collections
-    if (isWip && !isAuthorizedWipMinter(activeAccount.address)) {
-      return {
-        success: false,
-        error: `Permission Denied: Work In Progress - WIP collection & WIP logo collection are locked. Only authorized creators (${WIP_AUTHORIZED_MINTERS[0]} & ${WIP_AUTHORIZED_MINTERS[1]}) can mint to those collections. Please switch to an authorized wallet or choose "Collection Contract (1/1000)" or "Independent Single 1/1 Edition".`,
-      };
-    }
-
-    // Verify balance
-    const currentBal = activeAccount.balances[targetChain] || 0;
-    if (currentBal < gasFee) {
-      return {
-        success: false,
-        error: `Insufficient ${chainConfig.symbol} balance for gas fee (${gasFee} ${chainConfig.symbol} required). Use the faucet to claim free test tokens!`,
-      };
-    }
-
-    // Deduct gas
-    setAccounts(prev => prev.map((acc, i) => {
-      if (i === activeAccountIndex) {
-        return {
-          ...acc,
-          balances: {
-            ...acc.balances,
-            [targetChain]: +(acc.balances[targetChain] - gasFee).toFixed(6),
-          },
-        };
+    try {
+      if (!isConnected || activeAccount.type !== 'injected') throw new Error('Connect an authorized wallet before minting.');
+      if (!isAuthorizedWipMinter(activeAccount.address)) throw new Error('This wallet is not authorized to mint to the WIP collections.');
+      const address = nftData.contractAddress?.toLowerCase();
+      const isWip = address === WIP_COLLECTION.contractAddress.toLowerCase();
+      const isLogo = address === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
+      if (!isWip && !isLogo) throw new Error('On-chain minting is currently enabled only for the configured WIP and Logo contracts.');
+      if (!nftData.name?.trim()) throw new Error('Enter a name for this NFT.');
+      const image = String(nftData.image || '');
+      if (!image || (!image.startsWith('data:image/') && !image.startsWith('ipfs://') && !image.startsWith('ar://') && !/^https:\/\//i.test(image))) {
+        throw new Error('Choose an image or provide an IPFS, Arweave, or HTTPS image URL.');
       }
-      return acc;
-    }));
-
-    const txHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-
-    // Determine tokenId: If user provided a manual token ID, use it.
-    // Otherwise, generate in numerical order starting with zero for new collections!
-    let finalTokenId: string;
-    if (nftData.tokenId && String(nftData.tokenId).trim()) {
-      const cleanManual = String(nftData.tokenId).trim();
-      finalTokenId = cleanManual.startsWith('#') ? cleanManual : `#${cleanManual}`;
-    } else {
-      const targetColId = nftData.collectionId === 'col-wip-1000' ? 'col-contract-1000' : nftData.collectionId;
-      const targetAddr = contractAddr;
-      
-      const colTokens = nfts.filter(n => {
-        if (targetColId && n.collectionId === targetColId) return true;
-        if (targetAddr && n.contractAddress && n.contractAddress.toLowerCase() === targetAddr.toLowerCase()) return true;
-        return false;
+      const metadataUri = encodeJsonDataUri({
+        name: nftData.name,
+        description: nftData.description || '',
+        image,
+        attributes: (nftData.traits || []).map(trait => ({ trait_type: trait.trait_type, value: trait.value })),
       });
+      if (new TextEncoder().encode(metadataUri).length > 24 * 1024) {
+        throw new Error('The image or metadata is too large to store directly in the NFT contract. Use a smaller image or an IPFS/HTTPS image URL.');
+      }
+      const { wallet, public: publicClient, account } = await getConnectedPolygonClients(activeAccount.address);
+      const collectionAddress = getAddress(nftData.contractAddress!);
+      const supply = isWip
+        ? await publicClient.readContract({ address: collectionAddress, abi: wipCollectionAbi, functionName: 'totalSupply' })
+        : await publicClient.readContract({ address: collectionAddress, abi: logoCollectionAbi, functionName: 'totalSupply' });
+      if (supply >= 1000n) throw new Error('This collection has reached its 1,000 NFT supply limit.');
 
-      const usedNumbers = new Set<number>();
-      for (const n of colTokens) {
-        if (!n.tokenId) continue;
-        const clean = String(n.tokenId).replace(/^#/, '').trim();
-        const num = parseInt(clean, 10);
-        if (!isNaN(num) && num >= 0) {
-          usedNumbers.add(num);
-        }
+      let requestedId: bigint | undefined;
+      if (isWip) {
+        const tokenText = String(nftData.tokenId || '').replace(/^#/, '');
+        if (!/^\d+$/.test(tokenText)) throw new Error('WIP minting requires an explicit numeric token ID.');
+        requestedId = BigInt(tokenText);
+        if (requestedId >= 1000n) throw new Error('WIP token IDs must be between 0 and 999.');
       }
 
-      let seq = 0;
-      while (usedNumbers.has(seq)) {
-        seq++;
+      const hash = isWip && requestedId !== undefined
+        ? await wallet.writeContract({ address: collectionAddress, chain: polygon, abi: wipCollectionAbi, functionName: 'mintToWithId', args: [account, requestedId, metadataUri] })
+        : await wallet.writeContract({ address: collectionAddress, chain: polygon, abi: logoCollectionAbi, functionName: 'mintTo', args: [account, metadataUri] });
+      onSubmitted?.(hash);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 2 });
+      if (receipt.status !== 'success') throw new Error(`Mint transaction reverted: ${hash}`);
+
+      let mintedId = requestedId;
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() !== collectionAddress.toLowerCase()) continue;
+        try {
+          const decoded: any = decodeEventLog({ abi: polygonTransferAbi, data: log.data, topics: (log as any).topics, strict: true });
+          if (decoded.eventName === 'Transfer' && decoded.args.from.toLowerCase() === zeroAddress && decoded.args.to.toLowerCase() === account.toLowerCase()) {
+            mintedId = decoded.args.tokenId;
+            break;
+          }
+        } catch { /* Ignore unrelated events and inspect the next log. */ }
       }
-      finalTokenId = `#${seq}`;
+      if (mintedId === undefined) throw new Error(`Mint confirmed (${hash}), but the contract did not emit a standard ERC-721 mint Transfer event. Refresh the collection to verify the token.`);
+
+      const tokenId = `#${mintedId.toString()}`;
+      const nft: NFT = {
+        id: `${collectionAddress.toLowerCase()}:${mintedId.toString()}`,
+        tokenId,
+        name: nftData.name,
+        description: nftData.description || '',
+        image,
+        chainId: 'polygon',
+        standard: 'ERC-721',
+        collectionId: isWip ? WIP_COLLECTION.id : WIP_LOGO_COLLECTION.id,
+        collectionName: isWip ? WIP_COLLECTION.name : WIP_LOGO_COLLECTION.name,
+        creatorAddress: account,
+        creatorName: activeAccount.name,
+        ownerAddress: account,
+        ownerName: activeAccount.name,
+        royaltyPercentage: isWip ? WIP_COLLECTION.royaltyBps / 100 : WIP_LOGO_COLLECTION.royaltyBps / 100,
+        royaltyPayoutAddress: isWip ? WIP_COLLECTION.royaltyReceiver : WIP_LOGO_COLLECTION.royaltyReceiver,
+        isListed: false,
+        createdAt: Date.now(),
+        traits: nftData.traits || [],
+        ipfsMetadataUri: metadataUri,
+        ipfsImageUri: image,
+        contractAddress: collectionAddress,
+        onChainVerified: true,
+        txHash: hash,
+        viewsCount: 0,
+        likesCount: 0,
+      };
+      setNfts(prev => [nft, ...prev.filter(item => !(item.contractAddress?.toLowerCase() === collectionAddress.toLowerCase() && item.tokenId.replace(/^#/, '') === mintedId!.toString()))]);
+      setTransactions(prev => [{
+        id: hash,
+        type: 'mint',
+        txHash: hash,
+        chainId: 'polygon',
+        fromAddress: account,
+        toAddress: collectionAddress,
+        nftId: nft.id,
+        nftName: nft.name,
+        nftImage: nft.image,
+        collectionId: nft.collectionId,
+        collectionName: nft.collectionName,
+        timestamp: Date.now(),
+        status: 'confirmed',
+        blockNumber: Number(receipt.blockNumber),
+      }, ...prev]);
+      void syncWipCollections(true);
+      return { success: true, nft, txHash: hash };
+    } catch (error: any) {
+      return { success: false, error: error?.shortMessage || error?.message || 'Polygon mint failed.' };
     }
-
-    const newNftId = `nft-${Date.now()}`;
-
-    const isCol1000 =
-      nftData.collectionId === 'col-contract-1000' ||
-      nftData.collectionId === 'col-wip-1000' ||
-      contractAddr.toLowerCase() === COLLECTION_FACTORY_1000.contractAddress.toLowerCase();
-
-    const isLogo = nftData.collectionId === 'col-wip-logo-polygon' || contractAddr.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
-    const defaultWipPrice = isLogo ? 50.0 : 25.0;
-    const computedPrice = nftData.price !== undefined && nftData.price > 0 ? nftData.price : (isWip ? defaultWipPrice : (isCol1000 ? 30.0 : undefined));
-    const isListed = isWip ? true : (!!computedPrice && computedPrice > 0);
-
-    const newNft: NFT = {
-      id: newNftId,
-      tokenId: finalTokenId,
-      name: nftData.name || (isWip ? `${matchedCol?.name || 'WIP NFT'} ${finalTokenId}` : (isCol1000 ? `${matchedCol?.name || 'Edition'} ${finalTokenId}` : `Masterpiece ${finalTokenId}`)),
-      description: nftData.description || (isWip ? `Official authenticated item in ${matchedCol?.name || 'Work In Progress Collection'} on Polygon.` : (isCol1000 ? `Verified 1/1000 smart contract edition minted via Collection Factory on Polygon (${COLLECTION_FACTORY_1000.contractAddress}).` : 'Exclusive on-chain NFT minted with cross-chain standard.')),
-      image: nftData.image || '',
-      animationUrl: nftData.animationUrl,
-      chainId: targetChain,
-      standard: nftData.standard || chainConfig.standard,
-      collectionId: nftData.collectionId === 'col-wip-1000' ? 'col-contract-1000' : nftData.collectionId,
-      collectionName: nftData.collectionName || matchedCol?.name || (isCol1000 ? 'Collection Contract (1/1000)' : (nftData.collectionId ? 'Collection Item' : 'Single Editions')),
-      creatorAddress: isWip ? (isLogo ? WIP_LOGO_COLLECTION.royaltyReceiver : WIP_COLLECTION.royaltyReceiver) : (isCol1000 ? (nftData.creatorAddress || activeAccount.address) : activeAccount.address),
-      creatorName: isWip ? 'WIP Collective' : (isCol1000 ? (activeAccount.name || 'Collection Creator') : activeAccount.name),
-      ownerAddress: activeAccount.address,
-      ownerName: activeAccount.name,
-      royaltyPercentage: isWip ? 10.0 : (isCol1000 ? 10.0 : (nftData.royaltyPercentage ?? 5.0)),
-      royaltyPayoutAddress: isWip ? (isLogo ? WIP_LOGO_COLLECTION.royaltyReceiver : WIP_COLLECTION.royaltyReceiver) : (isCol1000 ? (nftData.royaltyPayoutAddress || activeAccount.address) : (nftData.royaltyPayoutAddress || activeAccount.address)),
-      price: computedPrice,
-      isListed,
-      listedAt: isListed ? Date.now() : undefined,
-      createdAt: Date.now(),
-      traits: isWip && (!nftData.traits || nftData.traits.length === 0) ? [
-        { trait_type: 'Collection', value: matchedCol?.name || 'Work In Progress - WIP', rarityPercentage: 5 },
-        { trait_type: 'Auto-Sync', value: 'Instant Marketplace Active', rarityPercentage: 100 },
-        { trait_type: 'Enforced Royalty', value: '10.0%', rarityPercentage: 100 }
-      ] : (nftData.traits || []),
-      ipfsMetadataUri: `ipfs://Qm${Array.from({length: 44}, () => Math.floor(Math.random()*36).toString(36)).join('')}`,
-      ipfsImageUri: `ipfs://Qm${Array.from({length: 44}, () => Math.floor(Math.random()*36).toString(36)).join('')}`,
-      contractAddress: contractAddr,
-      txHash,
-      editionTotal: nftData.editionTotal || 1,
-      editionNumber: 1,
-      unlockableContent: nftData.unlockableContent,
-      hasUnlockableContent: !!nftData.unlockableContent,
-      viewsCount: 1,
-      likesCount: 0,
-    };
-
-    setNfts(prev => [newNft, ...prev]);
-
-    if (isWip) {
-      // Update collection supply
-      setCollections(prev => prev.map(c => {
-        if (c.id === nftData.collectionId || c.contractAddress.toLowerCase() === contractAddr.toLowerCase()) {
-          return { ...c, currentSupply: c.currentSupply + 1 };
-        }
-        return c;
-      }));
-
-      // Post to backend /api/mint for persistent cross-session sync
-      fetch('/api/mint', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          collection_id: nftData.collectionId || (isLogo ? 'col-wip-logo-polygon' : 'col-wip-polygon'),
-          token_id: finalTokenId,
-          name: newNft.name,
-          image: newNft.image,
-          owner_wallet: activeAccount.address,
-          chain: 'polygon',
-          traits: newNft.traits,
-          price: newNft.price,
-        }),
-      }).catch(() => {});
-
-      setLastSyncTimestamp(Date.now());
-    }
-
-    // Record Mint Transaction
-    const newTx: TransactionRecord = {
-      id: `tx-${Date.now()}`,
-      type: 'mint',
-      txHash,
-      chainId: targetChain,
-      fromAddress: activeAccount.address,
-      toAddress: contractAddr,
-      amountCrypto: 0,
-      amountUsd: 0,
-      gasUsedCrypto: gasFee,
-      gasUsedUsd: tier.estCostUsd,
-      gasPriceGwei: tier.totalGwei,
-      nftId: newNftId,
-      nftName: newNft.name,
-      nftImage: newNft.image,
-      collectionId: newNft.collectionId,
-      collectionName: newNft.collectionName,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-
-    setTransactions(prev => [newTx, ...prev]);
-
-    // Update collection currentSupply if associated
-    if (nftData.collectionId) {
-      setCollections(prev => prev.map(c => {
-        if (c.id === nftData.collectionId) {
-          return { ...c, currentSupply: c.currentSupply + 1 };
-        }
-        return c;
-      }));
-    }
-
-    return { success: true, nft: newNft, txHash };
   };
 
-  // DEPLOY COLLECTION METHOD
   const deployCollection = async (
-    colData: Partial<NFTCollection>
+    colData: Partial<NFTCollection>,
+    onSubmitted?: (txHash: string) => void,
+    factoryType: 'collection' | 'wip' = 'collection',
   ): Promise<{ success: boolean; collection?: NFTCollection; txHash?: string; error?: string }> => {
-    const targetChain = colData.chainId || activeChain;
-    const chainConfig = SUPPORTED_CHAINS[targetChain];
-    const deployGasCost = gasData.actionsEstimate.mintCollection.crypto;
+    try {
+      if (!isConnected || activeAccount.type !== 'injected') throw new Error('Connect a Polygon wallet before creating a collection.');
+      if (activeChain !== 'polygon') throw new Error('Switch to Polygon Mainnet before creating a collection.');
+      if (colData.standard !== 'ERC-721') throw new Error('The configured Polygon factories create ERC-721 collections.');
+      if (factoryType === 'collection' && Number(colData.maxSupply) !== 1000) throw new Error('The Collection Factory creates collections with a fixed 1,000 token supply.');
+      if (!colData.name?.trim() || !colData.symbol?.trim()) throw new Error('Collection name and symbol are required.');
+      const royaltyRecipient = getAddress(colData.royaltyPayoutAddress || ROYALTY_WALLET);
+      const royaltyBps = BigInt(Math.round(Number(colData.royaltyPercentage || 0) * 100));
+      if (royaltyBps < 0n || royaltyBps > 10000n) throw new Error('Royalty must be between 0% and 100%.');
+      const { wallet, public: publicClient, account } = await getConnectedPolygonClients(activeAccount.address);
+      const factoryAddress = getAddress(factoryType === 'wip' ? WIP_FACTORY.address : COLLECTION_FACTORY_1000.contractAddress);
+      const beforeAddresses: string[] = factoryType === 'wip'
+        ? await publicClient.readContract({ address: factoryAddress, abi: wipFactoryAbi, functionName: 'getWIPCollections' })
+        : await publicClient.readContract({ address: factoryAddress, abi: collectionFactoryAbi, functionName: 'getAllCollections' });
+      const hash = factoryType === 'wip'
+        ? await wallet.writeContract({
+            address: factoryAddress,
+            chain: polygon,
+            abi: wipFactoryAbi,
+            functionName: 'createWIPCollection',
+            args: [colData.name.trim(), colData.symbol.trim().toUpperCase(), royaltyRecipient],
+          })
+        : await wallet.writeContract({
+            address: factoryAddress,
+            chain: polygon,
+            abi: collectionFactoryAbi,
+            functionName: 'createCollection',
+            args: [colData.name.trim(), colData.symbol.trim().toUpperCase(), royaltyRecipient, royaltyBps],
+          });
+      onSubmitted?.(hash);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 2 });
+      if (receipt.status !== 'success') throw new Error(`Collection factory transaction reverted: ${hash}`);
 
-    const currentBal = activeAccount.balances[targetChain] || 0;
-    if (currentBal < deployGasCost) {
-      return {
-        success: false,
-        error: `Insufficient ${chainConfig.symbol} for smart contract deployment (${deployGasCost} ${chainConfig.symbol} required). Use faucet!`,
-      };
-    }
-
-    // Deduct gas
-    setAccounts(prev => prev.map((acc, i) => {
-      if (i === activeAccountIndex) {
-        return {
-          ...acc,
-          balances: {
-            ...acc.balances,
-            [targetChain]: +(acc.balances[targetChain] - deployGasCost).toFixed(6),
-          },
-        };
+      let createdAddress = '';
+      if (factoryType === 'wip') {
+        const afterAddresses: string[] = await publicClient.readContract({ address: factoryAddress, abi: wipFactoryAbi, functionName: 'getWIPCollections' });
+        const newAddresses = afterAddresses.filter(address => !beforeAddresses.some(before => before.toLowerCase() === address.toLowerCase()));
+        if (newAddresses.length !== 1) throw new Error(`WIP Factory transaction confirmed (${hash}), but its registry did not identify exactly one newly created collection.`);
+        createdAddress = getAddress(newAddresses[0]);
+      } else {
+        for (const log of receipt.logs) {
+          if (log.address.toLowerCase() !== factoryAddress.toLowerCase()) continue;
+          try {
+            const decoded: any = decodeEventLog({ abi: collectionFactoryAbi, data: log.data, topics: (log as any).topics, strict: true });
+            if (decoded.eventName === 'CollectionCreated') {
+              createdAddress = getAddress(decoded.args.collection);
+              break;
+            }
+          } catch { /* Ignore other factory events. */ }
+        }
+        if (!createdAddress) throw new Error(`Factory transaction confirmed (${hash}), but no CollectionCreated event was found.`);
+        const isRegistered = await publicClient.readContract({ address: factoryAddress, abi: collectionFactoryAbi, functionName: 'isCollection', args: [getAddress(createdAddress)] });
+        if (!isRegistered) throw new Error(`Factory emitted ${createdAddress}, but its registry does not recognize the collection.`);
       }
-      return acc;
-    }));
 
-    const contractAddress = `0x${Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-    const txHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-    const colId = `col-${Date.now()}`;
-
-    // Utilize factory contract ABI for deployment call signature validation
-    const deployAbiEntry = factoryABI.find(f => f.name === 'deployCollection');
-    const deployName = colData.name || 'New Collection';
-    const deploySymbol = (colData.symbol || 'NFT').toUpperCase();
-    if (deployAbiEntry) {
-      // Validated contract interface input parameters: [name: string, symbol: string]
+      const collection: NFTCollection = {
+        id: createdAddress.toLowerCase(),
+        contractAddress: createdAddress,
+        name: colData.name.trim(),
+        symbol: colData.symbol.trim().toUpperCase(),
+        description: colData.description || '',
+        bannerImage: colData.bannerImage || '',
+        avatarImage: colData.avatarImage || '',
+        chainId: 'polygon',
+        standard: 'ERC-721',
+        creatorAddress: account,
+        creatorName: activeAccount.name,
+        royaltyPercentage: factoryType === 'collection' ? Number(royaltyBps) / 100 : 0,
+        royaltyPayoutAddress: royaltyRecipient,
+        category: colData.category || 'art',
+        maxSupply: factoryType === 'collection' ? 1000 : 0,
+        currentSupply: 0,
+        floorPrice: 0,
+        totalVolume: 0,
+        ownersCount: 0,
+        createdAt: Date.now(),
+        verified: true,
+      };
+      setCollections(prev => [collection, ...prev.filter(existing => existing.contractAddress.toLowerCase() !== createdAddress.toLowerCase())]);
+      setTransactions(prev => [{ id: hash, type: 'deploy_collection', txHash: hash, chainId: 'polygon', fromAddress: account, toAddress: createdAddress, timestamp: Date.now(), status: 'confirmed', blockNumber: Number(receipt.blockNumber) }, ...prev]);
+      void fetch('/api/onchain/import-collection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contractAddress: createdAddress }) }).catch(() => {});
+      return { success: true, collection, txHash: hash };
+    } catch (error: any) {
+      return { success: false, error: error?.shortMessage || error?.message || 'Collection creation failed.' };
     }
-
-    const newCollection: NFTCollection = {
-      id: colId,
-      contractAddress,
-      name: deployName,
-      symbol: deploySymbol,
-      description: colData.description || 'Smart contract deployed on ' + chainConfig.name,
-      bannerImage: colData.bannerImage || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
-      avatarImage: colData.avatarImage || 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=400&q=80',
-      chainId: targetChain,
-      standard: colData.standard || chainConfig.standard,
-      creatorAddress: activeAccount.address,
-      creatorName: activeAccount.name,
-      royaltyPercentage: colData.royaltyPercentage ?? 5.0,
-      royaltyPayoutAddress: colData.royaltyPayoutAddress || activeAccount.address,
-      category: colData.category || 'art',
-      maxSupply: colData.maxSupply || 1000,
-      currentSupply: 0,
-      floorPrice: colData.floorPrice || 0,
-      totalVolume: 0,
-      ownersCount: 1,
-      createdAt: Date.now(),
-      verified: false,
-    };
-
-    setCollections(prev => [newCollection, ...prev]);
-
-    // Record deployment tx
-    const factoryAddress = targetChain === 'polygon' ? COLLECTION_FACTORY_1000.contractAddress : contractAddress;
-    const newTx: TransactionRecord = {
-      id: `tx-${Date.now()}`,
-      type: 'deploy_collection',
-      txHash,
-      chainId: targetChain,
-      fromAddress: activeAccount.address,
-      toAddress: factoryAddress,
-      amountCrypto: 0,
-      amountUsd: 0,
-      gasUsedCrypto: deployGasCost,
-      gasUsedUsd: +(deployGasCost * chainConfig.usdPrice).toFixed(2),
-      gasPriceGwei: gasData.currentGwei,
-      collectionId: colId,
-      collectionName: newCollection.name,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-
-    setTransactions(prev => [newTx, ...prev]);
-    return { success: true, collection: newCollection, txHash };
   };
 
   // BULK BATCH MINTING METHOD
+  // Batch minting stays disabled until a verified batch-mint ABI is available.
   const bulkMintNFTs = async (
-    items: BulkNFTItem[],
-    config: BulkMintConfig,
-    onProgress?: (progress: { current: number; total: number; name: string }) => void
+    _items: BulkNFTItem[],
+    _config: BulkMintConfig,
+    _onProgress?: (progress: { current: number; total: number; name: string }) => void
   ): Promise<{
     success: boolean;
     mintedNFTs?: NFT[];
@@ -1412,558 +1272,29 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     totalGasUsedCrypto?: number;
     totalGasUsedUsd?: number;
     error?: string;
-  }> => {
-    if (!items || items.length === 0) {
-      return { success: false, error: 'No NFT items provided for bulk minting' };
-    }
-
-    const targetChain = config.chainId || activeChain;
-    const chainConfig = SUPPORTED_CHAINS[targetChain];
-
-    // Compute batch gas savings with multicall simulation
-    const singleMintGas = gasData.actionsEstimate.mintSingle.crypto;
-    const baseMulticallGas = singleMintGas * 1.15;
-    const perItemAdditionalGas = singleMintGas * 0.42; // ~58% savings per additional token in batch
-    let totalGasCrypto = +(baseMulticallGas + (items.length - 1) * perItemAdditionalGas).toFixed(6);
-
-    let deployGasCost = 0;
-    let newlyCreatedCollection: NFTCollection | undefined = undefined;
-
-    // Check permissions if targeting existing collection
-    if (config.targetMode === 'existing_collection' && config.existingCollectionId) {
-      const existingCol = collections.find(c => c.id === config.existingCollectionId);
-      if (existingCol) {
-        const isBulkTargetWip = 
-          existingCol.id === 'col-wip-polygon' || 
-          existingCol.id === 'col-wip-logo-polygon' ||
-          existingCol.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
-          existingCol.contractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
-
-        if (isBulkTargetWip && !isAuthorizedWipMinter(activeAccount.address)) {
-          return {
-            success: false,
-            error: `Permission Denied: Work In Progress - WIP collection & WIP logo collection are locked. Only authorized creators (${WIP_AUTHORIZED_MINTERS[0]} & ${WIP_AUTHORIZED_MINTERS[1]}) can mint to those collections.`,
-          };
-        }
-      }
-    }
-
-    if (config.targetMode === 'new_collection') {
-      deployGasCost = gasData.actionsEstimate.mintCollection.crypto;
-      totalGasCrypto = +(totalGasCrypto + deployGasCost).toFixed(6);
-    }
-
-    const currentBal = activeAccount.balances[targetChain] || 0;
-    if (currentBal < totalGasCrypto) {
-      return {
-        success: false,
-        error: `Insufficient ${chainConfig.symbol} balance for batch minting. Estimated gas: ${totalGasCrypto} ${chainConfig.symbol}, but wallet has ${currentBal.toFixed(4)} ${chainConfig.symbol}. Claim tokens from the faucet!`,
-      };
-    }
-
-    // Deduct gas from active account
-    setAccounts(prev => prev.map((acc, i) => {
-      if (i === activeAccountIndex) {
-        return {
-          ...acc,
-          balances: {
-            ...acc.balances,
-            [targetChain]: +(acc.balances[targetChain] - totalGasCrypto).toFixed(6),
-          },
-        };
-      }
-      return acc;
-    }));
-
-    const batchTxHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-    let targetCollectionId: string | undefined = undefined;
-    let targetCollectionName: string | undefined = undefined;
-    let targetContractAddress = `0x${Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-
-    // Handle New Collection Deployment
-    if (config.targetMode === 'new_collection') {
-      const colId = `col-bulk-${Date.now()}`;
-      newlyCreatedCollection = {
-        id: colId,
-        contractAddress: targetContractAddress,
-        name: config.newCollectionName || 'Genesis Batch Collection',
-        symbol: (config.newCollectionSymbol || 'BATCH').toUpperCase(),
-        description: config.newCollectionDescription || `Official batch-minted collection on ${chainConfig.name}.`,
-        bannerImage: config.newCollectionBanner || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
-        avatarImage: config.newCollectionAvatar || items[0]?.image || 'https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=400&q=80',
-        chainId: targetChain,
-        standard: config.standard || chainConfig.standard,
-        creatorAddress: activeAccount.address,
-        creatorName: activeAccount.name,
-        royaltyPercentage: config.newCollectionRoyalty ?? (config.defaultRoyalty ?? 7.5),
-        royaltyPayoutAddress: activeAccount.address,
-        category: config.newCollectionCategory || 'art',
-        maxSupply: config.newCollectionMaxSupply || Math.max(items.length, 1000),
-        currentSupply: items.length,
-        floorPrice: config.defaultPrice || (items.find(i => i.price && i.price > 0)?.price || 0),
-        totalVolume: 0,
-        ownersCount: 1,
-        createdAt: Date.now(),
-        verified: true,
-      };
-
-      targetCollectionId = colId;
-      targetCollectionName = newlyCreatedCollection.name;
-
-      setCollections(prev => [newlyCreatedCollection!, ...prev]);
-
-      // Record Collection Deployment Tx
-      const deployTx: TransactionRecord = {
-        id: `tx-col-deploy-${Date.now()}`,
-        type: 'deploy_collection',
-        txHash: `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
-        chainId: targetChain,
-        fromAddress: activeAccount.address,
-        toAddress: targetContractAddress,
-        amountCrypto: 0,
-        amountUsd: 0,
-        gasUsedCrypto: deployGasCost,
-        gasUsedUsd: +(deployGasCost * chainConfig.usdPrice).toFixed(2),
-        gasPriceGwei: gasData.currentGwei,
-        collectionId: colId,
-        collectionName: newlyCreatedCollection.name,
-        timestamp: Date.now(),
-        status: 'confirmed',
-        blockNumber: Math.floor(18000000 + Math.random() * 500000),
-      };
-      setTransactions(prev => [deployTx, ...prev]);
-    } else if (config.targetMode === 'existing_collection' && config.existingCollectionId) {
-      const existingCol = collections.find(c => c.id === config.existingCollectionId);
-      if (existingCol) {
-        targetCollectionId = existingCol.id;
-        targetCollectionName = existingCol.name;
-        targetContractAddress = existingCol.contractAddress;
-
-        // Update supply
-        setCollections(prev => prev.map(c => {
-          if (c.id === config.existingCollectionId) {
-            return { ...c, currentSupply: c.currentSupply + items.length };
-          }
-          return c;
-        }));
-      }
-    }
-
-    // Build all NFT entities with numerical order starting with zero for new collections
-    const createdNFTs: NFT[] = [];
-    const now = Date.now();
-
-    // Determine starting token sequence for the collection
-    const usedNumbers = new Set<number>();
-    const isTargetExisting = config.targetMode === 'existing_collection' && (targetCollectionId || targetContractAddress);
-
-    if (isTargetExisting) {
-      const colTokens = nfts.filter(n => {
-        if (targetCollectionId && n.collectionId === targetCollectionId) return true;
-        if (targetContractAddress && n.contractAddress && n.contractAddress.toLowerCase() === targetContractAddress.toLowerCase()) return true;
-        return false;
-      });
-
-      for (const n of colTokens) {
-        if (!n.tokenId) continue;
-        const clean = String(n.tokenId).replace(/^#/, '').trim();
-        const num = parseInt(clean, 10);
-        if (!isNaN(num) && num >= 0) {
-          usedNumbers.add(num);
-        }
-      }
-    }
-
-    let nextAvailableSeq = config.startingTokenId !== undefined && config.startingTokenId >= 0 
-      ? config.startingTokenId 
-      : 0;
-
-    items.forEach((item, index) => {
-      const itemTxHash = index === 0 ? batchTxHash : `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-      
-      // Determine tokenId: manual override on item, or sequential starting with zero
-      let tokenIdString: string;
-      let tokenIdNumber: number;
-
-      if (item.tokenId !== undefined && String(item.tokenId).trim() !== '') {
-        const cleanManual = String(item.tokenId).trim();
-        tokenIdString = cleanManual.startsWith('#') ? cleanManual : `#${cleanManual}`;
-        const parsed = parseInt(cleanManual.replace(/^#/, ''), 10);
-        tokenIdNumber = !isNaN(parsed) && parsed >= 0 ? parsed : index;
-      } else {
-        while (usedNumbers.has(nextAvailableSeq)) {
-          nextAvailableSeq++;
-        }
-        tokenIdNumber = nextAvailableSeq;
-        tokenIdString = `#${tokenIdNumber}`;
-        usedNumbers.add(tokenIdNumber);
-        nextAvailableSeq++;
-      }
-      
-      const isTargetWip = 
-        targetCollectionId === 'col-wip-polygon' || 
-        targetCollectionId === 'col-wip-logo-polygon' ||
-        targetContractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase() ||
-        targetContractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
-
-      const isTargetLogo = targetCollectionId === 'col-wip-logo-polygon' || targetContractAddress.toLowerCase() === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
-      const defaultWipBulkPrice = isTargetLogo ? 50.0 : 25.0;
-      const itemPrice = item.price !== undefined && item.price > 0 ? item.price : (config.isInstantListAll ? config.defaultPrice : (isTargetWip ? defaultWipBulkPrice : undefined));
-      const isListed = isTargetWip ? true : (!!itemPrice && itemPrice > 0);
-
-      const newNFT: NFT = {
-        id: `nft-bulk-${now}-${index}-${index}`,
-        tokenId: tokenIdString,
-        name: item.name || `Batch NFT ${tokenIdString}`,
-        description: item.description || 'Verified multi-chain NFT minted via Nexus Bulk Minting Studio.',
-        image: item.image,
-        chainId: targetChain,
-        standard: config.standard || chainConfig.standard,
-        collectionId: targetCollectionId,
-        collectionName: targetCollectionName || 'Batch Mint Series',
-        creatorAddress: activeAccount.address,
-        creatorName: activeAccount.name,
-        ownerAddress: activeAccount.address,
-        ownerName: activeAccount.name,
-        royaltyPercentage: item.royaltyPercentage ?? (config.defaultRoyalty ?? 7.5),
-        royaltyPayoutAddress: activeAccount.address,
-        price: itemPrice,
-        isListed,
-        listedAt: isListed ? now : undefined,
-        createdAt: now + index * 10,
-        traits: item.traits && item.traits.length > 0 ? item.traits : [],
-        ipfsMetadataUri: `ipfs://QmBatchManifest/${tokenIdNumber}.json`,
-        ipfsImageUri: `ipfs://QmBatchImages/${tokenIdNumber}.png`,
-        contractAddress: targetContractAddress,
-        txHash: itemTxHash,
-        editionTotal: item.editionTotal || items.length,
-        editionNumber: item.editionNumber !== undefined ? item.editionNumber : tokenIdNumber,
-        unlockableContent: item.unlockableContent,
-        hasUnlockableContent: !!item.unlockableContent,
-        viewsCount: 1,
-        likesCount: 0,
-      };
-
-      createdNFTs.push(newNFT);
-
-      if (onProgress) {
-        onProgress({
-          current: index + 1,
-          total: items.length,
-          name: newNFT.name,
-        });
-      }
-    });
-
-    // Add all NFTs to state
-    setNfts(prev => [...createdNFTs, ...prev]);
-
-    // Record Batch Multicall Transaction
-    const totalGasUsd = +(totalGasCrypto * chainConfig.usdPrice).toFixed(2);
-    const batchTx: TransactionRecord = {
-      id: `tx-bulk-${now}`,
-      type: 'mint',
-      txHash: batchTxHash,
-      chainId: targetChain,
-      fromAddress: activeAccount.address,
-      toAddress: targetContractAddress,
-      amountCrypto: 0,
-      amountUsd: 0,
-      gasUsedCrypto: totalGasCrypto,
-      gasUsedUsd: totalGasUsd,
-      gasPriceGwei: gasData.currentGwei,
-      nftName: `Batch Mint: ${items.length} NFTs (${items[0]?.name}...)`,
-      nftImage: items[0]?.image,
-      collectionId: targetCollectionId,
-      collectionName: targetCollectionName,
-      timestamp: now,
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-    setTransactions(prev => [batchTx, ...prev]);
-
-    return {
-      success: true,
-      mintedNFTs: createdNFTs,
-      collection: newlyCreatedCollection,
-      txHash: batchTxHash,
-      totalGasUsedCrypto: totalGasCrypto,
-      totalGasUsedUsd: totalGasUsd,
-    };
-  };
+  }> => ({
+    success: false,
+    error: 'Bulk minting is unavailable: no verified batch mint contract method is configured. No transaction was sent.',
+  });
 
   // LIST / DELIST NFT
-  const listNFTForSale = async (nftId: string, price: number): Promise<boolean> => {
-    setNfts(prev => prev.map(item => {
-      if (item.id === nftId) {
-        return {
-          ...item,
-          price,
-          isListed: true,
-          listedAt: Date.now(),
-        };
-      }
-      return item;
-    }));
+  const listNFTForSale = async (_nftId: string, _price: number): Promise<boolean> => false;
 
-    const nft = nfts.find(n => n.id === nftId);
-    if (nft) {
-      const chainConfig = SUPPORTED_CHAINS[nft.chainId];
-      const newTx: TransactionRecord = {
-        id: `tx-list-${Date.now()}`,
-        type: 'list',
-        txHash: `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
-        chainId: nft.chainId,
-        fromAddress: activeAccount.address,
-        toAddress: nft.contractAddress,
-        amountCrypto: price,
-        amountUsd: +(price * chainConfig.usdPrice).toFixed(2),
-        nftId: nft.id,
-        nftName: nft.name,
-        nftImage: nft.image,
-        timestamp: Date.now(),
-        status: 'confirmed',
-        blockNumber: Math.floor(18000000 + Math.random() * 500000),
-      };
-      setTransactions(prev => [newTx, ...prev]);
-    }
-    return true;
-  };
-
-  const delistNFT = async (nftId: string): Promise<boolean> => {
-    setNfts(prev => prev.map(item => {
-      if (item.id === nftId) {
-        return {
-          ...item,
-          price: undefined,
-          isListed: false,
-          listedAt: undefined,
-        };
-      }
-      return item;
-    }));
-    return true;
-  };
+  const delistNFT = async (_nftId: string): Promise<boolean> => false;
 
   // BUY NFT WITH AUTOMATED CREATOR ROYALTY SPLIT
-  const buyNFT = async (nftId: string): Promise<{ success: boolean; royaltyPaid?: number; error?: string; txHash?: string }> => {
-    const nft = nfts.find(n => n.id === nftId);
-    if (!nft || !nft.price || !nft.isListed) {
-      return { success: false, error: 'NFT is not listed for sale' };
-    }
-
-    const price = nft.price;
-    const chainConfig = SUPPORTED_CHAINS[nft.chainId];
-    const buyerBalance = activeAccount.balances[nft.chainId] || 0;
-
-    const gasFee = gasData.actionsEstimate.buyNft.crypto;
-    const totalCost = price + gasFee;
-
-    if (buyerBalance < totalCost) {
-      return {
-        success: false,
-        error: `Insufficient balance. You need ${totalCost.toFixed(4)} ${chainConfig.symbol} (${price} price + ${gasFee.toFixed(4)} gas), but have ${buyerBalance.toFixed(4)} ${chainConfig.symbol}. Claim from faucet!`,
-      };
-    }
-
-    // Royalty & Marketplace Fee Calculations
-    const isWipNFT = nft.contractAddress.toLowerCase() === WIP_COLLECTION.contractAddress.toLowerCase();
-    const effectiveRoyaltyPercent = isWipNFT 
-      ? (WIP_COLLECTION.royaltyBps / 100) 
-      : (nft.royaltyPercentage || 0);
-    const effectiveRoyaltyReceiver = isWipNFT 
-      ? WIP_COLLECTION.royaltyReceiver 
-      : (nft.royaltyPayoutAddress || nft.creatorAddress);
-    const marketplaceFeeRate = isWipNFT 
-      ? (WIP_COLLECTION.marketplaceFeeBps / 10000) 
-      : 0.015; // 1.5% protocol fee for standard collections, 0% for WIP
-
-    const royaltyAmount = +(price * (effectiveRoyaltyPercent / 100)).toFixed(6);
-    const marketplaceFee = +(price * marketplaceFeeRate).toFixed(6);
-    const sellerPayout = +(price - royaltyAmount - marketplaceFee).toFixed(6);
-
-    const txHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
-
-    // 1. Update Accounts balances:
-    // - Deduct from buyer (price + gas)
-    // - Credit to seller (sellerPayout)
-    // - Credit to creator if different from seller (royaltyAmount)
-    setAccounts(prev => prev.map(acc => {
-      let updatedBalances = { ...acc.balances };
-
-      // Deduct from buyer
-      if (acc.address === activeAccount.address) {
-        updatedBalances[nft.chainId] = +(updatedBalances[nft.chainId] - totalCost).toFixed(6);
-      }
-
-      // Credit seller if demo account
-      if (acc.address === nft.ownerAddress && acc.address !== activeAccount.address) {
-        updatedBalances[nft.chainId] = +( (updatedBalances[nft.chainId] || 0) + sellerPayout ).toFixed(6);
-      }
-
-      // Credit creator royalty if demo account
-      if (acc.address.toLowerCase() === effectiveRoyaltyReceiver.toLowerCase() && acc.address !== nft.ownerAddress && acc.address !== activeAccount.address) {
-        updatedBalances[nft.chainId] = +( (updatedBalances[nft.chainId] || 0) + royaltyAmount ).toFixed(6);
-      }
-
-      return { ...acc, balances: updatedBalances };
-    }));
-
-    // 2. Transfer NFT ownership
-    const previousOwner = nft.ownerAddress;
-    setNfts(prev => prev.map(item => {
-      if (item.id === nftId) {
-        return {
-          ...item,
-          ownerAddress: activeAccount.address,
-          ownerName: activeAccount.name,
-          isListed: false,
-          price: undefined,
-          listedAt: undefined,
-        };
-      }
-      return item;
-    }));
-
-    // 3. Log Royalty Payout Audit Record
-    if (royaltyAmount > 0) {
-      const royaltyRecord: RoyaltyPayoutRecord = {
-        id: `roy-${Date.now()}`,
-        txHash,
-        nftId: nft.id,
-        nftName: nft.name,
-        nftImage: nft.image,
-        collectionName: nft.collectionName || 'Single Editions',
-        chainId: nft.chainId,
-        sellerAddress: previousOwner,
-        buyerAddress: activeAccount.address,
-        salePriceCrypto: price,
-        royaltyPercent: effectiveRoyaltyPercent,
-        royaltyAmountCrypto: royaltyAmount,
-        royaltyAmountUsd: +(royaltyAmount * chainConfig.usdPrice).toFixed(2),
-        marketplaceFeeCrypto: marketplaceFee,
-        sellerReceivedCrypto: sellerPayout,
-        timestamp: Date.now(),
-      };
-      setRoyaltyLogs(prev => [royaltyRecord, ...prev]);
-    }
-
-    // 4. Record Buy Transaction
-    const newTx: TransactionRecord = {
-      id: `tx-buy-${Date.now()}`,
-      type: 'buy',
-      txHash,
-      chainId: nft.chainId,
-      fromAddress: activeAccount.address,
-      toAddress: previousOwner,
-      amountCrypto: price,
-      amountUsd: +(price * chainConfig.usdPrice).toFixed(2),
-      gasUsedCrypto: gasFee,
-      gasUsedUsd: +(gasFee * chainConfig.usdPrice).toFixed(2),
-      gasPriceGwei: gasData.currentGwei,
-      nftId: nft.id,
-      nftName: nft.name,
-      nftImage: nft.image,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-    setTransactions(prev => [newTx, ...prev]);
-
-    return { success: true, royaltyPaid: royaltyAmount, txHash };
-  };
+  const buyNFT = async (_nftId: string): Promise<{ success: boolean; error?: string }> => ({ success: false, error: 'Purchases are unavailable until an audited marketplace contract is integrated. No transaction was sent.' });
 
   // TRANSFER NFT
-  const transferNFT = async (nftId: string, recipientAddress: string): Promise<boolean> => {
-    const nft = nfts.find(n => n.id === nftId);
-    if (!nft) return false;
-
-    setNfts(prev => prev.map(item => {
-      if (item.id === nftId) {
-        return {
-          ...item,
-          ownerAddress: recipientAddress,
-          ownerName: `Owner (${recipientAddress.slice(0, 6)}...${recipientAddress.slice(-4)})`,
-          isListed: false,
-          price: undefined,
-        };
-      }
-      return item;
-    }));
-
-    const newTx: TransactionRecord = {
-      id: `tx-transfer-${Date.now()}`,
-      type: 'transfer',
-      txHash: `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
-      chainId: nft.chainId,
-      fromAddress: activeAccount.address,
-      toAddress: recipientAddress,
-      nftId: nft.id,
-      nftName: nft.name,
-      nftImage: nft.image,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-    setTransactions(prev => [newTx, ...prev]);
-    return true;
-  };
+  const transferNFT = async (_nftId: string, _recipientAddress: string): Promise<boolean> => false;
 
   // BURN NFT
-  const burnNFT = async (nftId: string): Promise<boolean> => {
-    const nft = nfts.find(n => n.id === nftId);
-    if (!nft) return false;
-
-    setNfts(prev => prev.filter(item => item.id !== nftId));
-
-    const newTx: TransactionRecord = {
-      id: `tx-burn-${Date.now()}`,
-      type: 'burn',
-      txHash: `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`,
-      chainId: nft.chainId,
-      fromAddress: activeAccount.address,
-      toAddress: '0x000000000000000000000000000000000000dEaD',
-      nftId: nft.id,
-      nftName: nft.name,
-      nftImage: nft.image,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-    setTransactions(prev => [newTx, ...prev]);
-    return true;
-  };
+  const burnNFT = async (_nftId: string): Promise<boolean> => false;
 
   // MAKE & ACCEPT OFFERS
-  const makeOffer = async (nftId: string, amount: number): Promise<boolean> => {
-    const nft = nfts.find(n => n.id === nftId);
-    if (!nft) return false;
+  const makeOffer = async (_nftId: string, _amount: number): Promise<boolean> => false;
 
-    const chainConfig = SUPPORTED_CHAINS[nft.chainId];
-    const newOffer: NFTOffer = {
-      id: `offer-${Date.now()}`,
-      nftId,
-      bidderAddress: activeAccount.address,
-      bidderName: activeAccount.name,
-      amountCrypto: amount,
-      amountUsd: +(amount * chainConfig.usdPrice).toFixed(2),
-      chainId: nft.chainId,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 86400000 * 3,
-      status: 'active',
-    };
-    setOffers(prev => [newOffer, ...prev]);
-    return true;
-  };
-
-  const acceptOffer = async (offerId: string): Promise<boolean> => {
-    const offer = offers.find(o => o.id === offerId);
-    if (!offer) return false;
-    
-    // Process offer sale
-    setOffers(prev => prev.map(o => o.id === offerId ? { ...o, status: 'accepted' } : o));
-    return true;
-  };
+  const acceptOffer = async (_offerId: string): Promise<boolean> => false;
 
   const toggleLikeNFT = (nftId: string) => {
     setNfts(prev => prev.map(item => {
@@ -1976,233 +1307,14 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // CROSS-CHAIN NFT BRIDGE EXECUTION
-  const bridgeNFT = async ({
-    nftId,
-    destinationChain,
-    recipientAddress,
-    protocol,
-    gasSpeed = 'standard',
-    gasDropCrypto = 0,
-    onStepUpdate
-  }: {
-    nftId: string;
-    destinationChain: BlockchainNetwork;
-    recipientAddress: string;
-    protocol: BridgeProtocol;
-    gasSpeed?: 'slow' | 'standard' | 'fast' | 'instant';
-    gasDropCrypto?: number;
+  const bridgeNFT = async (_params: {
+    nftId: string; destinationChain: BlockchainNetwork; recipientAddress: string; protocol: BridgeProtocol;
+    gasSpeed?: 'slow' | 'standard' | 'fast' | 'instant'; gasDropCrypto?: number;
     onStepUpdate?: (step: number, message: string) => void;
-  }): Promise<{ success: boolean; bridgeTx?: BridgeTransaction; error?: string }> => {
-    const nft = nfts.find(n => n.id === nftId);
-    if (!nft) {
-      return { success: false, error: 'NFT not found in studio index' };
-    }
-
-    if (nft.chainId === destinationChain) {
-      return { success: false, error: 'Destination chain must be different from source chain' };
-    }
-
-    const sourceChain = nft.chainId;
-    const sourceConfig = SUPPORTED_CHAINS[sourceChain];
-    const destConfig = SUPPORTED_CHAINS[destinationChain];
-    const quote = calculateBridgeQuote(sourceChain, destinationChain, protocol, gasSpeed, gasDropCrypto);
-
-    // Check user balance on source chain
-    const currentSourceBalance = activeAccount.balances[sourceChain] || 0;
-    const totalSourceCostCrypto = +(quote.sourceGasCrypto + quote.protocolFeeCrypto + (gasDropCrypto ? (gasDropCrypto * destConfig.usdPrice) / sourceConfig.usdPrice : 0)).toFixed(6);
-
-    if (currentSourceBalance < totalSourceCostCrypto) {
-      return {
-        success: false,
-        error: `Insufficient ${sourceConfig.symbol} balance. Total bridge cost is ${totalSourceCostCrypto} ${sourceConfig.symbol} (Gas + Protocol Fee), but your balance is ${currentSourceBalance.toFixed(4)} ${sourceConfig.symbol}. Claim free testnet tokens from the Faucet!`
-      };
-    }
-
-    const sourceTxHash = generateRandomHex(64);
-    const destinationTxHash = generateRandomHex(64);
-    const messageId = protocol === 'layerzero' 
-      ? `LZ-GUID-${generateRandomHex(16)}`
-      : protocol === 'chainlink-ccip'
-      ? `CCIP-MSG-${generateRandomHex(16)}`
-      : protocol === 'wormhole'
-      ? `VAA-SEQ-${generateRandomHex(16)}`
-      : `HYPER-MSG-${generateRandomHex(16)}`;
-
-    const destContract = getBridgedContractAddress(destinationChain, nft.contractAddress);
-    const reqConfirms = getRequiredConfirmations(sourceChain);
-
-    const bridgeTxRecord: BridgeTransaction = {
-      id: `bridge-tx-${Date.now()}`,
-      nftId: nft.id,
-      nftName: nft.name,
-      nftImage: nft.image,
-      sourceChain,
-      destinationChain,
-      sourceContract: nft.contractAddress,
-      destinationContract: destContract,
-      sourceTokenId: nft.tokenId,
-      destinationTokenId: nft.tokenId,
-      senderAddress: activeAccount.address,
-      recipientAddress: recipientAddress || activeAccount.address,
-      protocol,
-      bridgeStandard: quote.bridgeStandard,
-      sourceTxHash,
-      destinationTxHash,
-      messageId,
-      timestamp: Date.now(),
-      status: 'initiating',
-      step: 1,
-      estTimeRemainingSeconds: quote.estTimeSeconds,
-      protocolFeeCrypto: quote.protocolFeeCrypto,
-      protocolFeeUsd: quote.protocolFeeUsd,
-      gasRelayFeeCrypto: quote.relayerGasCrypto,
-      gasRelayFeeUsd: quote.relayerGasUsd,
-      gasDropCrypto,
-      gasDropUsd: quote.gasDropUsd,
-      securityConfirmations: { current: Math.min(3, reqConfirms), required: reqConfirms },
-      explorerUrlSource: `${sourceConfig.blockExplorer}/tx/${sourceTxHash}`,
-      explorerUrlDest: `${destConfig.blockExplorer}/tx/${destinationTxHash}`,
-    };
-
-    // Add initial pending bridge tx
-    setBridgeTransactions(prev => [bridgeTxRecord, ...prev]);
-
-    // 1. Deduct source balance
-    setAccounts(prev => prev.map(acc => {
-      if (acc.address === activeAccount.address) {
-        const updated = { ...acc.balances };
-        updated[sourceChain] = +(Math.max(0, updated[sourceChain] - totalSourceCostCrypto)).toFixed(6);
-        return { ...acc, balances: updated };
-      }
-      return acc;
-    }));
-
-    // Step 1 Callback
-    onStepUpdate?.(1, `Transmitting lock/burn transaction on ${sourceConfig.name}...`);
-    await new Promise(r => setTimeout(r, 800));
-
-    // Update to source_confirmed
-    setBridgeTransactions(prev => prev.map(tx => {
-      if (tx.id === bridgeTxRecord.id) {
-        return {
-          ...tx,
-          status: 'source_confirmed',
-          step: 2,
-          securityConfirmations: { current: reqConfirms, required: reqConfirms }
-        };
-      }
-      return tx;
-    }));
-
-    // Step 2 Callback
-    onStepUpdate?.(2, `${BRIDGE_PROTOCOLS[protocol].name} oracles & DVN verifiers verifying packet cryptographic proof...`);
-    await new Promise(r => setTimeout(r, 1100));
-
-    // Update to verifying_relayers
-    setBridgeTransactions(prev => prev.map(tx => {
-      if (tx.id === bridgeTxRecord.id) {
-        return {
-          ...tx,
-          status: 'dest_executing',
-          step: 3,
-        };
-      }
-      return tx;
-    }));
-
-    // Step 3 Callback
-    onStepUpdate?.(3, `Relayer executing contract mint & transfer on ${destConfig.name}...`);
-    await new Promise(r => setTimeout(r, 1000));
-
-    // 2. If gas drop was requested, credit destination balance of recipient
-    if (gasDropCrypto > 0) {
-      setAccounts(prev => prev.map(acc => {
-        if (acc.address === recipientAddress || acc.address === activeAccount.address) {
-          const updated = { ...acc.balances };
-          updated[destinationChain] = +( (updated[destinationChain] || 0) + gasDropCrypto ).toFixed(6);
-          return { ...acc, balances: updated };
-        }
-        return acc;
-      }));
-    }
-
-    // 3. Update the NFT itself to be on the destination chain
-    setNfts(prev => prev.map(item => {
-      if (item.id === nft.id) {
-        return {
-          ...item,
-          chainId: destinationChain,
-          contractAddress: destContract,
-          ownerAddress: recipientAddress || activeAccount.address,
-          txHash: destinationTxHash,
-          isListed: false, // delist upon cross-chain migration
-          price: undefined,
-          listedAt: undefined,
-        };
-      }
-      return item;
-    }));
-
-    // 4. Log transactions on both chains
-    const sourceTx: TransactionRecord = {
-      id: `tx-bridgeout-${Date.now()}`,
-      type: 'bridge_out',
-      txHash: sourceTxHash,
-      chainId: sourceChain,
-      fromAddress: activeAccount.address,
-      toAddress: destConfig.blockExplorer,
-      amountCrypto: quote.protocolFeeCrypto,
-      amountUsd: quote.protocolFeeUsd,
-      gasUsedCrypto: quote.sourceGasCrypto,
-      gasUsedUsd: quote.sourceGasUsd,
-      nftId: nft.id,
-      nftName: nft.name,
-      nftImage: nft.image,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-
-    const destTx: TransactionRecord = {
-      id: `tx-bridgein-${Date.now()}`,
-      type: 'bridge_in',
-      txHash: destinationTxHash,
-      chainId: destinationChain,
-      fromAddress: '0x0000000000000000000000000000000000000000',
-      toAddress: recipientAddress || activeAccount.address,
-      amountCrypto: gasDropCrypto,
-      amountUsd: quote.gasDropUsd,
-      gasUsedCrypto: quote.relayerGasCrypto,
-      gasUsedUsd: quote.relayerGasUsd,
-      nftId: nft.id,
-      nftName: nft.name,
-      nftImage: nft.image,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(25000000 + Math.random() * 500000),
-    };
-
-    setTransactions(prev => [destTx, sourceTx, ...prev]);
-
-    // 5. Finalize Bridge Transaction record
-    const finalBridgeTx: BridgeTransaction = {
-      ...bridgeTxRecord,
-      status: 'completed',
-      step: 4,
-      estTimeRemainingSeconds: 0,
-      completedAt: Date.now(),
-    };
-
-    setBridgeTransactions(prev => prev.map(tx => tx.id === bridgeTxRecord.id ? finalBridgeTx : tx));
-
-    // Step 4 Callback
-    onStepUpdate?.(4, `Teleport complete! NFT is now live on ${destConfig.name}.`);
-
-    return {
-      success: true,
-      bridgeTx: finalBridgeTx
-    };
-  };
+  }): Promise<{ success: boolean; bridgeTx?: BridgeTransaction; error?: string }> => ({
+    success: false,
+    error: 'Bridging is unavailable until a production bridge protocol and contracts are integrated. No transaction was sent.',
+  });
 
   const clearBridgeHistory = () => {
     setBridgeTransactions([]);
@@ -2211,90 +1323,12 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // BATCH UPDATE ROYALTIES
   const batchUpdateRoyalties = async (
-    updates: BatchRoyaltyUpdateItem[]
-  ): Promise<BatchRoyaltyResult> => {
-    if (!updates || updates.length === 0) {
-      return { success: false, updatedCount: 0, error: 'No collection updates provided' };
-    }
-
-    const targetChain = activeChain;
-    const chainConfig = SUPPORTED_CHAINS[targetChain];
-    const baseMulticallGas = 0.0004; // Multicall batch optimization
-    const perCollectionGas = 0.00012;
-    const totalGasCrypto = +(baseMulticallGas + perCollectionGas * updates.length).toFixed(6);
-    const totalGasUsd = +(totalGasCrypto * chainConfig.usdPrice).toFixed(2);
-
-    // Deduct gas from active account balance
-    setAccounts(prev => prev.map((acc, i) => {
-      if (i === activeAccountIndex) {
-        return {
-          ...acc,
-          balances: {
-            ...acc.balances,
-            [targetChain]: +(Math.max(0, (acc.balances[targetChain] || 0) - totalGasCrypto)).toFixed(6),
-          },
-        };
-      }
-      return acc;
-    }));
-
-    const updateMap = new Map(updates.map(u => [u.collectionId, u]));
-
-    // Update collections state
-    setCollections(prev => prev.map(c => {
-      const update = updateMap.get(c.id);
-      if (update) {
-        return {
-          ...c,
-          royaltyPercentage: update.royaltyPercentage,
-          royaltyPayoutAddress: update.royaltyPayoutAddress || c.royaltyPayoutAddress || activeAccount.address,
-        };
-      }
-      return c;
-    }));
-
-    // Update all matching NFTs in state so marketplace and details stay in sync
-    setNfts(prev => prev.map(nft => {
-      if (nft.collectionId && updateMap.has(nft.collectionId)) {
-        const update = updateMap.get(nft.collectionId)!;
-        return {
-          ...nft,
-          royaltyPercentage: update.royaltyPercentage,
-          royaltyPayoutAddress: update.royaltyPayoutAddress || nft.royaltyPayoutAddress || activeAccount.address,
-        };
-      }
-      return nft;
-    }));
-
-    // Generate confirmed transaction record
-    const txHash = `0x${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
-    const royaltyTx: TransactionRecord = {
-      id: `tx-royalty-update-${Date.now()}`,
-      type: 'update_royalties',
-      txHash,
-      chainId: targetChain,
-      fromAddress: activeAccount.address,
-      toAddress: '0x0000000000000000000000000000000000000000',
-      amountCrypto: 0,
-      amountUsd: 0,
-      gasUsedCrypto: totalGasCrypto,
-      gasUsedUsd: totalGasUsd,
-      gasPriceGwei: gasData.currentGwei,
-      collectionName: `${updates.length} Collections (ERC-2981 Batch)`,
-      timestamp: Date.now(),
-      status: 'confirmed',
-      blockNumber: Math.floor(18000000 + Math.random() * 500000),
-    };
-    setTransactions(prev => [royaltyTx, ...prev]);
-
-    return {
-      success: true,
-      updatedCount: updates.length,
-      txHash,
-      totalGasUsedCrypto: totalGasCrypto,
-      totalGasUsedUsd: totalGasUsd,
-    };
-  };
+    _updates: BatchRoyaltyUpdateItem[]
+  ): Promise<BatchRoyaltyResult> => ({
+    success: false,
+    updatedCount: 0,
+    error: 'Royalty updates are unavailable until an audited contract method is configured. No transaction was sent.',
+  });
 
   // Aggregated Stats
   const totalPortfolioValueUsd = nfts
@@ -2356,7 +1390,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         wipConfig: WIP_COLLECTION,
         isWipCollection,
         isAuthorizedWipMinter,
-        isCurrentUserAuthorizedWipMinter: isAuthorizedWipMinter(activeAccount.address),
+        isCurrentUserAuthorizedWipMinter: isConnected && activeAccount.type === 'injected' && isAuthorizedWipMinter(activeAccount.address),
         wipAuthorizedMinters: WIP_AUTHORIZED_MINTERS,
         importOnChainCollection,
         polygonBlockNumber,
