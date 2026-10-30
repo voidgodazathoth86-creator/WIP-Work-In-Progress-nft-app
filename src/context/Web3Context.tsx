@@ -44,6 +44,7 @@ import {
 import { collectionFactoryAbi, logoCollectionAbi, wipCollectionAbi, wipFactoryAbi } from '../abi/polygonContracts';
 
 const polygonTransferAbi = [{ type: 'event', name: 'Transfer', anonymous: false, inputs: [{ indexed: true, name: 'from', type: 'address' }, { indexed: true, name: 'to', type: 'address' }, { indexed: true, name: 'tokenId', type: 'uint256' }] }] as const;
+const MAX_ON_CHAIN_METADATA_URI_BYTES = 24 * 1024;
 
 function encodeJsonDataUri(value: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
@@ -52,6 +53,64 @@ function encodeJsonDataUri(value: unknown): string {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   }
   return `data:application/json;base64,${btoa(binary)}`;
+}
+
+function buildNftMetadataUri(nftData: Partial<NFT>, image: string): string {
+  return encodeJsonDataUri({
+    name: nftData.name,
+    description: nftData.description || '',
+    image,
+    attributes: (nftData.traits || []).map(trait => ({ trait_type: trait.trait_type, value: trait.value })),
+  });
+}
+
+async function optimizeInlineImageForOnChainMetadata(
+  source: string,
+  metadataUriForImage: (image: string) => string,
+): Promise<{ image: string; metadataUri: string }> {
+  let metadataUri = metadataUriForImage(source);
+  if (new TextEncoder().encode(metadataUri).length <= MAX_ON_CHAIN_METADATA_URI_BYTES) {
+    return { image: source, metadataUri };
+  }
+
+  if (!source.startsWith('data:image/')) {
+    throw new Error('The metadata is too large for this collection. Shorten the description or use an IPFS/HTTPS image URL.');
+  }
+  if (typeof Image === 'undefined' || typeof document === 'undefined') {
+    throw new Error('This image is too large to embed on-chain. Use an IPFS or HTTPS image URL instead.');
+  }
+
+  const loadedImage = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('The uploaded image could not be optimized. Use an IPFS or HTTPS image URL instead.'));
+    image.src = source;
+  });
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Image optimization is unavailable in this browser. Use an IPFS or HTTPS image URL instead.');
+
+  for (const maxDimension of [1024, 768, 512, 384, 256, 192, 128]) {
+    const scale = Math.min(1, maxDimension / Math.max(loadedImage.naturalWidth, loadedImage.naturalHeight));
+    canvas.width = Math.max(1, Math.round(loadedImage.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(loadedImage.naturalHeight * scale));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(loadedImage, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of [0.78, 0.62, 0.46, 0.32]) {
+      let optimizedImage = canvas.toDataURL('image/webp', quality);
+      if (!optimizedImage.startsWith('data:image/webp,')) {
+        optimizedImage = canvas.toDataURL('image/jpeg', quality);
+      }
+      metadataUri = metadataUriForImage(optimizedImage);
+      if (new TextEncoder().encode(metadataUri).length <= MAX_ON_CHAIN_METADATA_URI_BYTES) {
+        return { image: optimizedImage, metadataUri };
+      }
+    }
+  }
+
+  throw new Error('This image is still too large after automatic optimization. Use a hosted IPFS or HTTPS image URL to keep its full resolution.');
 }
 
 async function getConnectedPolygonClients(accountAddress: string): Promise<{ wallet: any; public: any; account: `0x${string}` }> {
@@ -1066,19 +1125,15 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const isLogo = address === WIP_LOGO_COLLECTION.contractAddress.toLowerCase();
       if (!isWip && !isLogo) throw new Error('On-chain minting is currently enabled only for the configured WIP and Logo contracts.');
       if (!nftData.name?.trim()) throw new Error('Enter a name for this NFT.');
-      const image = String(nftData.image || '');
+      let image = String(nftData.image || '');
       if (!image || (!image.startsWith('data:image/') && !image.startsWith('ipfs://') && !image.startsWith('ar://') && !/^https:\/\//i.test(image))) {
         throw new Error('Choose an image or provide an IPFS, Arweave, or HTTPS image URL.');
       }
-      const metadataUri = encodeJsonDataUri({
-        name: nftData.name,
-        description: nftData.description || '',
+      const { image: mintImage, metadataUri } = await optimizeInlineImageForOnChainMetadata(
         image,
-        attributes: (nftData.traits || []).map(trait => ({ trait_type: trait.trait_type, value: trait.value })),
-      });
-      if (new TextEncoder().encode(metadataUri).length > 24 * 1024) {
-        throw new Error('The image or metadata is too large to store directly in the NFT contract. Use a smaller image or an IPFS/HTTPS image URL.');
-      }
+        candidateImage => buildNftMetadataUri(nftData, candidateImage),
+      );
+      image = mintImage;
       const { wallet, public: publicClient, account } = await getConnectedPolygonClients(activeAccount.address);
       const collectionAddress = getAddress(nftData.contractAddress!);
       const supply = isWip

@@ -691,6 +691,10 @@ export const MintStudio: React.FC<MintStudioProps> = ({ onSuccess, onOpenDashboa
                     )}
                   </div>
 
+                  <p className="text-[11px] text-zinc-500">
+                    Large uploads are automatically resized for the WIP and Logo on-chain metadata limit. Use an IPFS or HTTPS image URL to keep the original resolution.
+                  </p>
+
                   {uploadedImageUrl ? (
                     <div className="p-2.5 rounded-xl bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-cyan-950/40 border border-purple-500/30 space-y-2">
                       <div className="flex items-center justify-between text-xs">
