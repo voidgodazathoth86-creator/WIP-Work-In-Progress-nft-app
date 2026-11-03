@@ -313,18 +313,32 @@ export const NFTDetailModal: React.FC<NFTDetailModalProps> = ({ nft, onClose, on
               {/* WIP Collection OpenSea & Enforced Royalty Indicator */}
               {isWipCollection(activeNFT.contractAddress) && (
                 <div className="pt-2 border-t border-zinc-800/80 space-y-2">
-                  <a
-                    href={wipConfig.openseaUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-blue-950/40 hover:bg-blue-900/50 border border-blue-500/30 text-blue-300 text-xs font-semibold transition-all group"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-                      <span>View on OpenSea</span>
-                    </div>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-200">Polygon</span>
-                  </a>
+                  <div className="grid grid-cols-2 gap-2">
+                    <a
+                      href={wipConfig.openseaUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between px-3 py-2 rounded-lg bg-blue-950/40 hover:bg-blue-900/50 border border-blue-500/30 text-blue-300 text-xs font-semibold transition-all group"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                        <span>OpenSea</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-200">WIP</span>
+                    </a>
+                    <a
+                      href={`https://polygonscan.com/token/${activeNFT.contractAddress}?a=${isNaN(parseInt(String(activeNFT.tokenId || '0').replace(/^#/, ''), 10)) ? String(activeNFT.tokenId || '0').replace(/^#/, '') : parseInt(String(activeNFT.tokenId || '0').replace(/^#/, ''), 10)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between px-3 py-2 rounded-lg bg-purple-950/40 hover:bg-purple-900/50 border border-purple-500/30 text-purple-300 text-xs font-semibold transition-all group"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                        <span>Polygonscan</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-200">#Token</span>
+                    </a>
+                  </div>
                   <div className="p-2 rounded-lg bg-purple-950/30 border border-purple-500/20 space-y-1 text-[11px]">
                     <div className="flex items-center justify-between text-purple-300 font-medium">
                       <span>Enforced Royalty:</span>

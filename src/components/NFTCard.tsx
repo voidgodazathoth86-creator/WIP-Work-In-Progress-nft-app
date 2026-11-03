@@ -110,7 +110,7 @@ export const NFTCard: React.FC<NFTCardProps> = ({ nft, onSelect, onQuickBuy }) =
               On-Chain Verified
             </span>
             <a
-              href={`https://polygonscan.com/token/${nft.contractAddress}?a=${String(nft.tokenId || '0').replace(/^#/, '')}`}
+              href={`https://polygonscan.com/token/${nft.contractAddress}?a=${isNaN(parseInt(String(nft.tokenId || '0').replace(/^#/, ''), 10)) ? String(nft.tokenId || '0').replace(/^#/, '') : parseInt(String(nft.tokenId || '0').replace(/^#/, ''), 10)}`}
               target="_blank"
               rel="noreferrer"
               onClick={(e) => e.stopPropagation()}
